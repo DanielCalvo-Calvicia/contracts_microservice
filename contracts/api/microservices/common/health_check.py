@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol, Optional
+from dataclasses import dataclass
 
 from contracts.api.common.base import BaseRequest, BaseResponse
 
@@ -18,8 +17,7 @@ class HealthCheckRequest(BaseRequest[HealthCheckRequestDTO]):
 
 @dataclass(slots=True, frozen=True)
 class HealthCheckResponseDTO:
-    is_available: bool
-
+    pass
 
 @dataclass(slots=True, frozen=True)
 class HealthCheckResponse(BaseResponse[HealthCheckResponseDTO]):
