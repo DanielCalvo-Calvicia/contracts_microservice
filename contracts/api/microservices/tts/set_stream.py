@@ -26,5 +26,5 @@ class TTSSetStreamResponseDTO:
     headers: dict[str, str]
 
 @dataclass(slots=True, frozen=True)
-class TTSSetStreamResponse(BaseResponse[TTSSetStreamResponseDTO]):
+class TTSSetStreamResponse(TTSSetStreamResponseDTO):
     pass
