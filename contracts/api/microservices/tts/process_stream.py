@@ -20,9 +20,12 @@ class TTSProcessBatchRequest(BaseRequest[TTSProcessBatchRequestDTO]):
 
 @dataclass(slots=True, frozen=True)
 class TTSProcessBatchResponseDTO:
-    audio_stream: AsyncIterator[bytes]
+    content: AsyncIterator[str] | AsyncIterator[bytes]
+    media_type: str
+    status_code: int
+    headers: dict[str, str]
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchResponse(BaseResponse[TTSProcessBatchResponseDTO]):
+class TTSProcessBatchResponse(TTSProcessBatchResponseDTO):
     pass
