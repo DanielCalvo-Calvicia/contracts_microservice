@@ -20,7 +20,9 @@ class TTSProcessBatchRequest(BaseRequest[TTSProcessBatchRequestDTO]):
 
 @dataclass(slots=True, frozen=True)
 class TTSProcessBatchResponseDTO:
-    audio_data: bytes
+    audio_data_base64: str
+    sample_rate: int
+    channels: int
 
 
 @dataclass(slots=True, frozen=True)
