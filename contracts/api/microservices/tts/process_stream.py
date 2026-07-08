@@ -7,19 +7,19 @@ from contracts.api.common.base import BaseRequest, BaseResponse
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchRequestDTO:
+class TTSProcessRequestDTO:
     text_stream: AsyncIterator[str]
     sample_rate: int = 22050
     channels: int = 1
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchRequest(BaseRequest[TTSProcessBatchRequestDTO]):
+class TTSProcessRequest(BaseRequest[TTSProcessRequestDTO]):
     pass
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchResponseDTO:
+class TTSProcessResponseDTO:
     content: AsyncIterator[str] | AsyncIterator[bytes]
     media_type: str
     status_code: int
@@ -27,5 +27,5 @@ class TTSProcessBatchResponseDTO:
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchResponse(TTSProcessBatchResponseDTO):
+class TTSProcessResponse(TTSProcessResponseDTO):
     pass
