@@ -18,9 +18,13 @@ class TTSGetStreamRequest(BaseRequest[TTSGetStreamRequestDTO]):
 
 @dataclass(slots=True, frozen=True)
 class TTSGetStreamResponseDTO:
-    audio_stream: AsyncIterator[bytes]
+    content: AsyncIterator[str] | AsyncIterator[bytes]
+    media_type: str
+    status_code: int
+    headers: dict[str, str]
+
 
 
 @dataclass(slots=True, frozen=True)
-class TTSGetStreamResponse(BaseResponse[TTSGetStreamResponseDTO]):
+class TTSGetStreamResponse(TTSGetStreamResponseDTO):
     pass

@@ -20,8 +20,10 @@ class TTSSetStreamRequest(BaseRequest[TTSSetStreamRequestDTO]):
 
 @dataclass(slots=True, frozen=True)
 class TTSSetStreamResponseDTO:
-    pass
-
+    content: AsyncIterator[str] | AsyncIterator[bytes]
+    media_type: str
+    status_code: int
+    headers: dict[str, str]
 
 @dataclass(slots=True, frozen=True)
 class TTSSetStreamResponse(BaseResponse[TTSSetStreamResponseDTO]):
