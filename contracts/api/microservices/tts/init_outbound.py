@@ -13,7 +13,7 @@ class InitOutboundRequest:
     session_id: str
     adapter: AdaptersTTS = "openai"
 
-dataclass(slots=True, frozen=True)
+@dataclass(slots=True, frozen=True)
 class InitOutboundResponse:
     session_id: str
     adapter_initialized: bool
