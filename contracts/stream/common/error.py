@@ -1,8 +1,8 @@
-from dataclasses import dataclass
-from typing import Generic, TypeVar
+from dataclasses import dataclass, field
+from typing import Literal
 
 
-from contracts.stream.common.base import BaseEvent
+from contracts.stream.common.base import BaseEvent, EventType
     
 @dataclass(slots=True, frozen=True)
 class ErrorEventDTO:
@@ -12,4 +12,7 @@ class ErrorEventDTO:
 
 @dataclass(frozen=True, slots=True)
 class ErrorEvent(BaseEvent[ErrorEventDTO]):
-    type: str = "error"
+    type: Literal[EventType.ERROR] = field(
+        default=EventType.ERROR,
+        init=False,
+    )

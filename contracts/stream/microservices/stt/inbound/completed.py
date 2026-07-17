@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
-from contracts.stream.common.base import BaseEvent
+from contracts.stream.common.base import BaseEvent, EventType
 
 
 @dataclass(slots=True, frozen=True)
@@ -11,5 +12,8 @@ class STTCompletedInboundEventDTO:
 
 @dataclass(slots=True, frozen=True)
 class STTCompletedInboundEvent(BaseEvent[STTCompletedInboundEventDTO]):
-    type: str = "completed"
+    type: Literal[EventType.COMPLETED] = field(
+        default=EventType.COMPLETED,
+        init=False,
+    )
 

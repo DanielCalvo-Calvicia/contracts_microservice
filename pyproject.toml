@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contracts-microservice"
-version = "0.2.3"
+version = "0.3.0"
 description = "Shared contracts for microservices"
 requires-python = ">=3.10"
 

@@ -1,8 +1,9 @@
-from dataclasses import dataclass
-from typing import Generic, TypeVar
+from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Literal
 
-from contracts.stream.common.base import BaseEvent
+from contracts.stream.common.base import BaseEvent, EventType
     
 @dataclass(slots=True, frozen=True)
 class MicrophoneStreamStartedEventDTO:
@@ -12,4 +13,7 @@ class MicrophoneStreamStartedEventDTO:
 
 @dataclass(frozen=True, slots=True)
 class MicrophoneStreamStartedEvent(BaseEvent[MicrophoneStreamStartedEventDTO]):
-    type: str = "stream_started"
+    type: Literal[EventType.START_STREAM] = field(
+        default=EventType.START_STREAM,
+        init=False,
+    )
