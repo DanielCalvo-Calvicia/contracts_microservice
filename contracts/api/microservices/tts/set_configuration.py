@@ -40,7 +40,7 @@ class SetConfigurationRequest:
 
 
 @dataclass(slots=True, frozen=True)
-class TTSGetStreamResponse:
+class SetConfigurationResponse:
     session_id: str
     stream_ready: bool
     media_type: str = "audio/L16"
