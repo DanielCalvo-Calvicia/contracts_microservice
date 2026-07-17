@@ -1,30 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
-
-from contracts.api.common.base import BaseRequest, BaseResponse
+from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(slots=True, frozen=True)
-class StepperBatchStartRequestDTO:
+class StepperBatchCommand:
     stepper_id: str
-    action: str  # 'rotate', 'steps', 'stop'
-    value: float = 0.0  # rotate -> full revolutions; steps -> number of steps
-    speed: float = 0.0  # rotate -> RPM; steps -> steps per second
-    direction: str = "forward"  # 'forward' or 'reverse'
-
-@dataclass(slots=True, frozen=True)
-class StepperBatchStartRequest(BaseRequest[StepperBatchStartRequestDTO]):
-    pass
+    action: Literal["rotate", "steps", "stop"]
+    value: float = 0.0
+    speed: float = 0.0
+    direction: Literal["forward", "reverse"] = "forward"
 
 
 @dataclass(slots=True, frozen=True)
-class StepperBatchStartResponseDTO:
+class StepperBatchResult:
     success: bool
     message: str
-
-
-@dataclass(slots=True, frozen=True)
-class StepperBatchStartResponse(BaseResponse[StepperBatchStartResponseDTO]):
-    pass

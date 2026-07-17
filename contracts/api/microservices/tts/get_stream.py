@@ -1,30 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from contracts.api.common.base import BaseRequest, BaseResponse
-
-
-@dataclass(slots=True, frozen=True)
-class TTSGetStreamRequestDTO:
-    pass
+from contracts.api.common.stream import StreamDirection
 
 
 @dataclass(slots=True, frozen=True)
-class TTSGetStreamRequest(BaseRequest[TTSGetStreamRequestDTO]):
-    pass
+class TTSGetStreamRequest:
+    session_id: str
+    direction: StreamDirection = "outbound"
+    encoding: str = "pcm16"
+    from_sequence: Optional[int] = None
 
 
 @dataclass(slots=True, frozen=True)
-class TTSGetStreamResponseDTO:
-    content: AsyncIterator[str] | AsyncIterator[bytes]
-    media_type: str
-    status_code: int
-    headers: dict[str, str]
-
-
-
-@dataclass(slots=True, frozen=True)
-class TTSGetStreamResponse(TTSGetStreamResponseDTO):
-    pass
+class TTSGetStreamResponse:
+    session_id: str
+    stream_ready: bool
+    media_type: str = "audio/L16"
+    message: str = "ready"

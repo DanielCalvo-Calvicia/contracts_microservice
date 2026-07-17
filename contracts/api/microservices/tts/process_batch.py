@@ -1,30 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
-
-from contracts.api.common.base import BaseRequest, BaseResponse
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchRequestDTO:
+class TTSProcessBatchRequest:
     text: str
     sample_rate: int = 22050
     channels: int = 1
+    language: Optional[str] = None
+    voice: Optional[str] = None
+    model: Optional[str] = None
 
 
 @dataclass(slots=True, frozen=True)
-class TTSProcessBatchRequest(BaseRequest[TTSProcessBatchRequestDTO]):
-    pass
-
-
-@dataclass(slots=True, frozen=True)
-class TTSProcessBatchResponseDTO:
+class TTSProcessBatchResponse:
     audio_data_base64: str
     sample_rate: int
     channels: int
-
-
-@dataclass(slots=True, frozen=True)
-class TTSProcessBatchResponse(BaseResponse[TTSProcessBatchResponseDTO]):
-    pass

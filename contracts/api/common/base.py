@@ -5,26 +5,21 @@ from typing import Any, Generic, Optional, TypeVar
 
 T = TypeVar("T")
 
-@dataclass(slots=True, frozen=True)
-class BaseResponse(Generic[T]):
-    status_code: int
-    detail: str
-    headers: Optional[dict[str, str]]
-    action: str
-    status: str
-    message: str
-    timestamp: float
-    metadata: Optional[dict[str, Any]]
-    data: Optional[T]
 
 @dataclass(slots=True, frozen=True)
-class BaseRequest(Generic[T]):
-    status_code: int
-    detail: str
-    headers: Optional[dict[str, str]]
-    action: str
-    status: str
+class Command(Generic[T]):
+    """Application input contract with optional metadata for tracing/correlation."""
+
+    data: T
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class Result(Generic[T]):
+    """Application output contract without transport concerns."""
+
+    ok: bool
     message: str
-    timestamp: float
-    metadata: Optional[dict[str, Any]]
-    data: Optional[T]
+    data: Optional[T] = None
+    error_code: Optional[str] = None
+    metadata: dict[str, Any] = field(default_factory=dict)

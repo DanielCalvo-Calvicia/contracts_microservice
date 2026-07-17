@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol, Optional
-
-from contracts.api.common.base import BaseRequest, BaseResponse
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(slots=True, frozen=True)
-class AvailabilityRequestDTO:
-    pass
+class AvailabilityRequest:
+    service_name: Optional[str] = None
 
 
 @dataclass(slots=True, frozen=True)
-class AvailabilityRequest(BaseRequest[AvailabilityRequestDTO]):
-    pass
-
-
-@dataclass(slots=True, frozen=True)
-class AvailabilityResponseDTO:
+class AvailabilityResponse:
     is_available: bool
-
-
-@dataclass(slots=True, frozen=True)
-class AvailabilityResponse(BaseResponse[AvailabilityResponseDTO]):
-    pass
+    reason: Optional[str] = None

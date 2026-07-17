@@ -1,31 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from contracts.api.common.base import BaseRequest, BaseResponse
+from contracts.api.common.session import SessionCreateRequest, SessionCreateResponse
 
 
 @dataclass(slots=True, frozen=True)
-class SpeakerStartRequestDTO:
-    """Inbound client payload delivering raw audio chunks."""
-    audio_stream: AsyncIterator[bytes]
+class SpeakerConfig:
     sample_rate: int = 24000
     channels: int = 1
-    #setup_future: asyncio.Future[PlaybackStreamResponseDto] | None = None
+    encoding: str = "pcm16"
+    output_device_id: Optional[str] = None
 
 
 @dataclass(slots=True, frozen=True)
-class SpeakerStartRequest(BaseRequest[SpeakerStartRequestDTO]):
+class SpeakerStartSessionRequest(SessionCreateRequest[SpeakerConfig]):
     pass
 
 
 @dataclass(slots=True, frozen=True)
-class SpeakerStartResponseDTO:
-    success: bool
-    message: str
-
-
-@dataclass(slots=True, frozen=True)
-class SpeakerStartResponse(BaseResponse[SpeakerStartResponseDTO]):
-    pass
+class SpeakerStartSessionResponse(SessionCreateResponse):
+    accepted_config: SpeakerConfig = SpeakerConfig()

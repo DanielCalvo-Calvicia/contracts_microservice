@@ -1,26 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from contracts.api.common.base import BaseRequest, BaseResponse
-
-
-@dataclass(slots=True, frozen=True)
-class STTGetStreamStartRequestDTO:
-    pass
+from contracts.api.common.stream import StreamDirection
 
 
 @dataclass(slots=True, frozen=True)
-class STTGetStreamStartRequest(BaseRequest[STTGetStreamStartRequestDTO]):
-    pass
+class STTGetStreamRequest:
+    session_id: str
+    direction: StreamDirection = "outbound"
+    encoding: str = "utf-8"
+    include_partials: bool = True
+    from_sequence: Optional[int] = None
 
 
 @dataclass(slots=True, frozen=True)
-class STTGetStreamStartResponseDTO:
-    text_stream: AsyncIterator[str]
-
-
-@dataclass(slots=True, frozen=True)
-class STTGetStreamStartResponse(BaseResponse[STTGetStreamStartResponseDTO]):
-    pass
+class STTGetStreamResponse:
+    session_id: str
+    stream_ready: bool
+    message: str

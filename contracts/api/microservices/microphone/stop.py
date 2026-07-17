@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol, Optional
+from dataclasses import dataclass
 
-from contracts.api.common.base import BaseRequest, BaseResponse
+from contracts.api.common.session import SessionCloseRequest, SessionCloseResponse
 
 
 @dataclass(slots=True, frozen=True)
-class MicrophoneStopRequestDTO:
+class MicrophoneStopSessionRequest(SessionCloseRequest):
     pass
 
 
 @dataclass(slots=True, frozen=True)
-class MicrophoneStopRequest(BaseRequest[MicrophoneStopRequestDTO]):
-    pass
-
-
-@dataclass(slots=True, frozen=True)
-class MicrophoneStopResponseDTO:
-    success: bool = True
-
-
-@dataclass(slots=True, frozen=True)
-class MicrophoneStopResponse(BaseResponse[MicrophoneStopResponseDTO]):
+class MicrophoneStopSessionResponse(SessionCloseResponse):
     pass

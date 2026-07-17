@@ -7,15 +7,15 @@ from contracts.api.common.stream import StreamDirection
 
 
 @dataclass(slots=True, frozen=True)
-class STTSetStreamRequest:
+class SpeakerStreamAttachRequest:
     session_id: str
     direction: StreamDirection = "inbound"
     chunk_bytes: int = 1024
-    content_type: Optional[str] = "audio/L16"
+    content_type: Optional[str] = None
 
 
 @dataclass(slots=True, frozen=True)
-class STTSetStreamResponse:
+class SpeakerStreamAttachResponse:
     session_id: str
     accepted: bool
     message: str

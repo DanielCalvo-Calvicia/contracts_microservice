@@ -1,30 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from contracts.api.common.base import BaseRequest, BaseResponse
-
-
-@dataclass(slots=True, frozen=True)
-class TTSSetStreamRequestDTO:
-    text_stream: AsyncIterator[str]
-    sample_rate: int = 22050
-    channels: int = 1
+from contracts.api.common.stream import StreamDirection
 
 
 @dataclass(slots=True, frozen=True)
-class TTSSetStreamRequest(BaseRequest[TTSSetStreamRequestDTO]):
-    pass
+class TTSSetStreamRequest:
+    session_id: str
+    direction: StreamDirection = "inbound"
+    chunk_bytes: int = 1024
+    content_type: Optional[str] = "text/plain"
 
 
 @dataclass(slots=True, frozen=True)
-class TTSSetStreamResponseDTO:
-    content: AsyncIterator[str] | AsyncIterator[bytes]
-    media_type: str
-    status_code: int
-    headers: dict[str, str]
-
-@dataclass(slots=True, frozen=True)
-class TTSSetStreamResponse(TTSSetStreamResponseDTO):
-    pass
+class TTSSetStreamResponse:
+    session_id: str
+    accepted: bool
+    message: str

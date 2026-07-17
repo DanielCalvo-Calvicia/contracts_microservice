@@ -1,29 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Protocol, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from contracts.api.common.base import BaseRequest, BaseResponse
+from contracts.api.common.session import SessionCreateRequest, SessionCreateResponse
 
 
 @dataclass(slots=True, frozen=True)
-class MicrophoneStartRequestDTO:
+class MicrophoneConfig:
     sample_rate: int = 16000
     channels: int = 1
-    format: str = "pcm16"
+    encoding: str = "pcm16"
+    frame_ms: int = 20
+    device_id: Optional[str] = None
 
 
 @dataclass(slots=True, frozen=True)
-class MicrophoneStartRequest(BaseRequest[MicrophoneStartRequestDTO]):
+class MicrophoneStartSessionRequest(SessionCreateRequest[MicrophoneConfig]):
     pass
 
 
 @dataclass(slots=True, frozen=True)
-class MicrophoneStartResponseDTO:
-    stream: AsyncIterator[bytes]
-    sample_rate: int
-
-
-@dataclass(slots=True, frozen=True)
-class MicrophoneStartResponse(BaseResponse[MicrophoneStartResponseDTO]):
-    pass
+class MicrophoneStartSessionResponse(SessionCreateResponse):
+    accepted_config: MicrophoneConfig = MicrophoneConfig()
