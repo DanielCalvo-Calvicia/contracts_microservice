@@ -1,10 +1,40 @@
 import json
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Any, Generic, TypeVar
 
 T = TypeVar("T")
+
+
+class ContractViolation(ValueError):
+    """A stream message does not conform to the project stream contract."""
+
+
+def utc_now() -> datetime:
+    """Timezone-aware "now" in UTC; the only clock stream events should be stamped with."""
+    return datetime.now(UTC)
+
+
+def format_timestamp(value: datetime) -> str:
+    """Wire form of an event timestamp: UTC ISO-8601 with microseconds and a ``Z`` suffix.
+
+    Naive datetimes are interpreted as UTC. Every consumer requires the ``Z`` form, so the
+    contract (not each service) owns this formatting.
+    """
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC)
+    return value.replace(tzinfo=None).isoformat(timespec="microseconds") + "Z"
+
+
+def parse_timestamp(value: str) -> datetime:
+    """Inverse of :func:`format_timestamp`; the wire form must be UTC and end with ``Z``."""
+    if not value.endswith("Z"):
+        raise ContractViolation(f"timestamp must be UTC ISO-8601 ending in Z: {value!r}")
+    try:
+        return datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    except ValueError as error:
+        raise ContractViolation(f"timestamp is not ISO-8601: {value!r}") from error
 
 
 class EventType(StrEnum):
@@ -12,6 +42,7 @@ class EventType(StrEnum):
     START_STREAM = "stream_started"
     PARTIAL = "partial"
     COMPLETED = "completed"
+    INPUT_COMPLETED = "input_completed"
     ERROR = "error"
 
 
@@ -25,7 +56,7 @@ class BaseEvent(Generic[T]):
     @staticmethod
     def _serialize_value(value: Any) -> Any:
         if isinstance(value, datetime):
-            return value.isoformat()
+            return format_timestamp(value)
         if isinstance(value, Enum):
             return value.value
         if is_dataclass(value) and not isinstance(value, type):
@@ -47,11 +78,9 @@ class BaseEvent(Generic[T]):
             "type": self._serialize_value(self.type),
             "sequence": self.sequence,
             "timestamp": self._serialize_value(self.timestamp),
-            "payload": self._serialize_value(self.payload),
+            # The envelope requires ``payload`` to be an object; payload-less events send ``{}``.
+            "payload": {} if self.payload is None else self._serialize_value(self.payload),
         }
 
     def to_json(self, **kwargs: Any) -> str:
         return json.dumps(self.to_dict(), **kwargs)
-
-
-

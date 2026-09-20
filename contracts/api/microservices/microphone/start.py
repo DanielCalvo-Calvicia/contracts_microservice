@@ -12,6 +12,7 @@ class MicrophoneConfig:
     channels: int = 1
     encoding: str = "pcm16"
     frame_ms: int = 20
+    chunk_size: int = 1024  # samples per capture chunk; what POST /start accepts
     device_id: Optional[str] = None
 
 

@@ -10,7 +10,7 @@ from contracts.stream.common.base import BaseEvent, EventType
 class SpeakerCompletedOutboundEventDTO:
     reason: str
     output: str
-    chunk_count: str
+    chunk_count: int
     byte_count: int
     message: str
 

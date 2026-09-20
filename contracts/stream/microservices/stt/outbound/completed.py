@@ -7,12 +7,12 @@ from contracts.stream.common.base import BaseEvent, EventType
 
 
 @dataclass(slots=True, frozen=True)
-class STTCompletedInboundEventDTO:
+class STTCompletedOutboundEventDTO:
     reason: str
     output: str
 
 @dataclass(slots=True, frozen=True)
-class STTCompletedInboundEvent(BaseEvent[STTCompletedInboundEventDTO]):
+class STTCompletedOutboundEvent(BaseEvent[STTCompletedOutboundEventDTO]):
     type: Literal[EventType.COMPLETED] = field(
         default=EventType.COMPLETED,
         init=False,
