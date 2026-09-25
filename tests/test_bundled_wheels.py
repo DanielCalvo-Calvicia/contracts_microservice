@@ -8,7 +8,16 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-SERVICES = ("brain", "microphone", "speaker", "stt", "tts")
+# Folder names of every consumer. Most are "<service>_microservice"; ai-agent is the exception.
+SERVICE_FOLDERS = (
+    "brain_microservice",
+    "microphone_microservice",
+    "speaker_microservice",
+    "stt_microservice",
+    "tts_microservice",
+    "ai-agent",
+    "stepper_microservice",
+)
 VERSION = re.search(r'^version = "(.+)"', (CONTRACTS / "pyproject.toml").read_text(), re.M).group(1)
 WHEEL = f"contracts_microservice-{VERSION}-py3-none-any.whl"
 FIX = "run: brain_microservice/windows/Scripts/python.exe contracts/scripts/bundle.py"
@@ -22,9 +31,9 @@ def _source_files() -> dict[str, bytes]:
     }
 
 
-@pytest.mark.parametrize("service", SERVICES)
+@pytest.mark.parametrize("service", SERVICE_FOLDERS)
 def test_the_bundled_wheel_is_current_and_identical_to_the_source(service: str) -> None:
-    wheel = ROOT / f"{service}_microservice" / "vendor" / WHEEL
+    wheel = ROOT / service / "vendor" / WHEEL
     assert wheel.exists(), f"{service}: {WHEEL} missing; {FIX}"
     others = [p.name for p in wheel.parent.glob("contracts_microservice-*.whl") if p.name != WHEEL]
     assert not others, f"{service}: stale wheels {others}; {FIX}"
@@ -41,10 +50,10 @@ def test_the_bundled_wheel_is_current_and_identical_to_the_source(service: str) 
     assert not changed, f"{service}: differs from /contracts in {changed[:5]}; {FIX}"
 
 
-@pytest.mark.parametrize("service", SERVICES)
-@pytest.mark.parametrize("name", ["requirements.windows.txt", "requirements.linux.txt"])
+@pytest.mark.parametrize("service", SERVICE_FOLDERS)
+@pytest.mark.parametrize("name", ["requirements.windows.txt", "requirements.linux.txt", "requirements.txt"])
 def test_requirements_install_the_bundled_wheel_not_a_sibling_path(service: str, name: str) -> None:
-    path = ROOT / f"{service}_microservice" / name
+    path = ROOT / service / name
     if not path.exists():
         pytest.skip(f"{service} has no {name}")
     text = path.read_text()

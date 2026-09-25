@@ -49,6 +49,18 @@ from contracts.stream.microservices.speaker.outbound.stream_started import (
     SpeakerStreamStartedEvent,
     SpeakerStreamStartedEventDTO,
 )
+from contracts.stream.microservices.stepper.inbound.completed import (
+    StepperCompletedInboundEvent,
+    StepperCompletedInboundEventDTO,
+)
+from contracts.stream.microservices.stepper.inbound.partial import (
+    StepperPartialInboundEvent,
+    StepperPartialInboundEventDTO,
+)
+from contracts.stream.microservices.stepper.outbound.completed import (
+    StepperCompletedOutboundEvent,
+    StepperCompletedOutboundEventDTO,
+)
 from contracts.stream.microservices.stt.inbound.completed import (
     STTCompletedInboundEvent,
     STTCompletedInboundEventDTO,
@@ -159,5 +171,23 @@ SPEAKER_OUTBOUND = StreamSchema(
     {
         EventType.START_STREAM: (SpeakerStreamStartedEvent, SpeakerStreamStartedEventDTO),
         EventType.COMPLETED: (SpeakerCompletedOutboundEvent, SpeakerCompletedOutboundEventDTO),
+    },
+)
+
+# Stepper's stream endpoint (``/process/stream/{id}/set``) is not implemented yet (commands are
+# read and discarded, see StepperService.execute_stream): these schemas exist for when it is, and
+# carry no ``stream_started`` event because none is defined for stepper yet.
+STEPPER_INBOUND = StreamSchema(
+    "stepper.inbound",
+    {
+        EventType.PARTIAL: (StepperPartialInboundEvent, StepperPartialInboundEventDTO),
+        EventType.COMPLETED: (StepperCompletedInboundEvent, StepperCompletedInboundEventDTO),
+    },
+)
+
+STEPPER_OUTBOUND = StreamSchema(
+    "stepper.outbound",
+    {
+        EventType.COMPLETED: (StepperCompletedOutboundEvent, StepperCompletedOutboundEventDTO),
     },
 )

@@ -95,6 +95,7 @@ def test_a_spoken_utterance_travels_the_whole_pipeline_and_arrives_at_the_speake
     from infrastructure.outbound.http.speaker.speaker_adapter import HttpSpeakerAdapter
     from infrastructure.outbound.http.stt.stt_adapter import HttpSTTAdapter
     from infrastructure.outbound.http.tts.tts_adapter import HttpTTSAdapter
+    from tests.shared.fakes import DiagnosticAIAgent, DiagnosticStepper
 
     def config(name: str, **kwargs) -> HttpServiceConfig:
         return HttpServiceConfig(name, f"http://127.0.0.1:{ports[name]}", timeout_seconds=30, **kwargs)
@@ -105,11 +106,18 @@ def test_a_spoken_utterance_travels_the_whole_pipeline_and_arrives_at_the_speake
             return trace_id, await pipeline()
 
     async def pipeline():
+        # Neither ai-agent nor stepper is part of this wire test (it only exercises
+        # mic -> STT -> TTS -> speaker, and neither is started as a fake service process here);
+        # neither is wired into the live pipeline yet either, so diagnostic fakes stand in.
+        # response=None echoes STT's text back unchanged: this test's assertion is about audio
+        # format/duration at the given sample rate, not about what ai-agent decided to say.
         service = BrainService(
             HttpMicrophoneAdapter(config("microphone")),
             HttpSTTAdapter(config("stt")),
             HttpTTSAdapter(config("tts")),
             HttpSpeakerAdapter(config("speaker")),
+            DiagnosticAIAgent(response=None),
+            DiagnosticStepper(),
         )
         return await asyncio.wait_for(
             service.run_voice_pipeline(

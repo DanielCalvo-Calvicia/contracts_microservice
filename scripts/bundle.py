@@ -16,7 +16,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS = ROOT / "contracts"
-SERVICES = ("brain", "microphone", "speaker", "stt", "tts")
+# Folder names of every consumer. Most are "<service>_microservice"; ai-agent is the exception.
+SERVICE_FOLDERS = (
+    "brain_microservice",
+    "microphone_microservice",
+    "speaker_microservice",
+    "stt_microservice",
+    "tts_microservice",
+    "ai-agent",
+    "stepper_microservice",
+)
 
 
 def build_wheel(into: Path) -> Path:
@@ -31,13 +40,13 @@ def build_wheel(into: Path) -> Path:
 def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         wheel = build_wheel(Path(tmp))
-        for service in SERVICES:
-            vendor = ROOT / f"{service}_microservice" / "vendor"
+        for folder in SERVICE_FOLDERS:
+            vendor = ROOT / folder / "vendor"
             vendor.mkdir(exist_ok=True)
             for old in vendor.glob("contracts_microservice-*.whl"):
                 old.unlink()
             shutil.copy2(wheel, vendor / wheel.name)
-            print(f"{service}_microservice/vendor/{wheel.name}")
+            print(f"{folder}/vendor/{wheel.name}")
         print(f"requirements must reference ./vendor/{wheel.name}")
 
 
