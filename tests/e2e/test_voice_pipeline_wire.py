@@ -88,14 +88,14 @@ def test_a_spoken_utterance_travels_the_whole_pipeline_and_arrives_at_the_speake
     brain = REPO / "brain_microservice"
     sys.path.insert(0, str(brain))
     from application.dtos.service_dtos import VoicePipelineServiceRequestDto
-    from application.services.service import BrainService
-    from infrastructure.outbound.http.base import HttpServiceConfig
+    from application.services.brain_service import BrainService
+    from infrastructure.outbound.http.http_client import HttpServiceConfig
     from shared_logging import current_trace_id, span
     from infrastructure.outbound.http.microphone.microphone_adapter import HttpMicrophoneAdapter
     from infrastructure.outbound.http.speaker.speaker_adapter import HttpSpeakerAdapter
     from infrastructure.outbound.http.stt.stt_adapter import HttpSTTAdapter
     from infrastructure.outbound.http.tts.tts_adapter import HttpTTSAdapter
-    from tests.shared.fakes import DiagnosticAIAgent, DiagnosticStepper
+    from tests.shared.fakes import SILENT, DiagnosticAIAgent, DiagnosticStepper
 
     def config(name: str, **kwargs) -> HttpServiceConfig:
         return HttpServiceConfig(name, f"http://127.0.0.1:{ports[name]}", timeout_seconds=30, **kwargs)
@@ -116,8 +116,9 @@ def test_a_spoken_utterance_travels_the_whole_pipeline_and_arrives_at_the_speake
             HttpSTTAdapter(config("stt")),
             HttpTTSAdapter(config("tts")),
             HttpSpeakerAdapter(config("speaker")),
-            DiagnosticAIAgent(response=None),
             DiagnosticStepper(),
+            (DiagnosticAIAgent(response=None),),    # conversation-flow only: echoes the text back
+            SILENT,                                 # no "message received" / "thinking": the audio length is asserted
         )
         return await asyncio.wait_for(
             service.run_voice_pipeline(

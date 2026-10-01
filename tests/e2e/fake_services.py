@@ -1,10 +1,11 @@
 """Launches ONE real microservice over real HTTP with fake hardware/engines.
 
-    <service venv python> fake_services.py <microphone|stt|tts|speaker> <port>
+    <service venv python> fake_services.py <microphone|stt|tts|speaker|ai_agent> <port>
 
 Run with the service's own directory as the working directory and its own virtualenv: the code under
 test is the service's real HTTP layer, application layer and composition; only the devices (sound
-card, whisper, SAPI) are replaced. Used by ``test_voice_pipeline_wire.py``.
+card, whisper, SAPI) and ai-agent's LLM are replaced. Used by ``test_voice_pipeline_wire.py`` and
+``test_brain_ai_agent_flows.py``.
 """
 
 import asyncio
@@ -165,10 +166,105 @@ def build_speaker() -> FastAPI:
     return app
 
 
-BUILDERS = {"microphone": build_microphone, "stt": build_stt, "tts": build_tts, "speaker": build_speaker}
+def build_ai_agent() -> FastAPI:
+    """ai-agent through its REAL composition root (flows, routes, sessions, tracing); only the LLM is replaced.
+
+    The replacement answers by the keywords of the user's message, so the two flows can be driven without a
+    provider: motion-flow plans "there and back" (left 90, then left -90), asks "how many degrees" when asked to
+    "move my arm", refuses "too far"; conversation-flow's draft says whether it was told a robot_context.
+    ``/_e2e/formats`` lists the LLM calls the service made (which phases ran) and ``/_e2e/reset`` forgets them.
+    """
+    import re
+
+    from application.outbound.ports.llm_ports import LLMOutboundPort
+    from infrastructure.outbound.llm import vercel
+    from infrastructure.outbound.llm.response_mapper import build_response
+
+    usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    steady_next_step = {"ready_to_execute": True, "status": "complete", "recommended_action": "",
+                        "blocking_reason": "", "requested_user_input": []}
+
+    class KeywordLLM(LLMOutboundPort):
+        def __init__(self) -> None:
+            self.formats: list[str] = []
+            self.draft = ""
+
+        def is_available(self) -> bool:
+            return True
+
+        @staticmethod
+        def _current_and_answers(text: str) -> str:
+            """The user's current message and the answers the user gave when asked: never the earlier turns."""
+            current = text.split("Current user message:\n", 1)[-1]
+            current, _, answers = current.partition("\n\nInformation the user gave when asked:")
+            return (current + " " + answers).lower()
+
+        def ask(self, payload):
+            fmt = payload.response_format.name if payload.response_format else "<text>"
+            self.formats.append(fmt)
+            text = payload.message.content
+            if fmt == "<text>":  # phase 99: the question for the user
+                return build_response("Which arm, and how many degrees?", usage)
+            if fmt == "triage_specialist_phase1_response_format":
+                return build_response({
+                    "intent": {"primary": "information_request", "secondary": [], "confidence": 0.9},
+                    "user_goal": {"summary": "goal", "expected_outcome": "outcome"},
+                    "task_category": {"domain": "system", "type": "generation", "complexity": "low"},
+                    "next_step": {**steady_next_step, "status": "proceed", "recommended_action": "plan"},
+                }, usage)
+            if fmt == "motion_planner_phase20_response_format":
+                heard = self._current_and_answers(text)
+                if "too far" in heard:
+                    moves = [("left", 9999, "forward")]
+                elif "there and back" in heard:
+                    moves = [("left", 90, "forward"), ("left", -90, "forward")]
+                elif "30 degrees" in heard:
+                    moves = [("left", 30, "forward")]
+                elif "move my arm" in heard:
+                    return build_response({"is_motion_request": True, "movements": [], "next_step": {
+                        "ready_to_execute": False, "status": "awaiting_user_input",
+                        "recommended_action": "ask_user_for_missing_information", "blocking_reason": "details missing",
+                        "requested_user_input": ["Which arm, and how many degrees?"]}}, usage)
+                else:
+                    return build_response({"is_motion_request": False, "movements": [],
+                                           "next_step": steady_next_step}, usage)
+                return build_response({"is_motion_request": True, "next_step": steady_next_step, "movements": [
+                    {"arm": arm, "degrees": degrees, "direction": direction} for arm, degrees, direction in moves]}, usage)
+            if fmt == "answer_checker_phase9_response_format":
+                reply = re.search(r"'user_reply': '([^']*)'", text)
+                return build_response({"verdict": "answered", "answer": reply.group(1) if reply else "",
+                                       "message_to_user": ""}, usage)
+            if fmt == "draft_writer_phase7_response_format":
+                told = re.search(r"'robot_context': (.*)\}$", text, re.S)
+                self.draft = ("TOLD " + told.group(1)) if told else "PLAIN"
+                return build_response({"user_goal": {"summary": "s", "expected_outcome": self.draft}}, usage)
+            if fmt == "editor_in_chief_phase8_response_format":
+                return build_response({"user_goal": {"summary": "s", "expected_outcome": self.draft},
+                                       "next_step": steady_next_step}, usage)
+            raise AssertionError(f"unexpected response format: {fmt}")
+
+    llm = KeywordLLM()
+    vercel.VercelAIAdapter = lambda Config: llm  # before composition_root.main binds the name
+    from composition_root import main as composition_root
+
+    @composition_root.app.get("/_e2e/formats")
+    async def formats():
+        return llm.formats
+
+    @composition_root.app.get("/_e2e/reset")
+    async def reset():
+        llm.formats.clear()
+        return {"ok": True}
+
+    return composition_root.app
+
+
+BUILDERS = {"microphone": build_microphone, "stt": build_stt, "tts": build_tts, "speaker": build_speaker,
+            "ai_agent": build_ai_agent}
 
 if __name__ == "__main__":
     name, port = sys.argv[1], int(sys.argv[2])
     app = BUILDERS[name]()
-    app.add_middleware(TracingMiddleware)  # as every real composition root does
+    if name != "ai_agent":  # ai-agent's own composition root already added it
+        app.add_middleware(TracingMiddleware)  # as every real composition root does
     uvicorn.run(app, host="127.0.0.1", port=port, log_config=None, access_log=False)

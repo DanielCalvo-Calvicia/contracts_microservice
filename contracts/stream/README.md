@@ -18,6 +18,11 @@ Microphone --MICROPHONE_OUTBOUND--> Brain --STT_INBOUND----> STT
                                     Brain <--SPEAKER_OUTBOUND- Speaker   (playback result)
 ```
 
+Stepper has `STEPPER_INBOUND`/`STEPPER_OUTBOUND` schemas, used by its stream route (`/process/stream/{id}/set`): the
+sender streams `stream_started` (`stepper_id`) and one `partial` per motor command (`rotate`, `steps` or `stop`), and the
+stepper answers with `stream_started`, one `partial` result per command (`action`, `success`, `message`) and `completed`.
+Brain currently drives the motors through the batch `/control/{id}/...` calls instead.
+
 Each arrow is one HTTP request/response whose body is an event stream, so the W3C `traceparent`
 header of Brain's request covers the whole life of the stream (no trace id lives in the event).
 
@@ -25,7 +30,7 @@ header of Brain's request covers the whole life of the stream (no trace id lives
 
 | field       | rule |
 |-------------|------|
-| `type`      | `stream_started` \| `partial` \| `completed` \| `heartbeat` \| `error` |
+| `type`      | `stream_started` \| `partial` \| `completed` \| `input_completed` \| `heartbeat` \| `error` |
 | `sequence`  | 1, 2, 3, … per stream and direction, no gaps |
 | `timestamp` | UTC ISO-8601 with microseconds and a trailing `Z` |
 | `payload`   | always a JSON object (`{}` for `stream_started`/`heartbeat` without data) |
@@ -41,6 +46,8 @@ stream_started -> (partial | heartbeat)* -> completed ... -> end of body
                                   \-> error (recoverable=true: keep reading; false: the stream is over)
 ```
 
+* `input_completed` (`reason`, default `end_of_input`) is what STT and TTS answer on an upload request once the sender
+  ended its stream (schema `UPLOAD_ACK`); it is not a unit boundary of the data stream.
 * `stream_started` is first and sent once. The receiver rejects anything else first.
 * `completed` closes one *unit* (an utterance, a spoken text, a playback), not necessarily the stream:
   STT, TTS and Brain's text stream carry several units, each ending in its own `completed`.

@@ -1,751 +1,81 @@
-# contracts.api README
+# contracts.api
 
-This document describes every contract class currently available under `contracts.api` and how each one is intended to be used.
+Request/response dataclasses for the non-stream HTTP side of the services. Regenerated from the code on 2026-10-01 (version 0.10.0); the module list below is complete, the field lists are what the classes declare.
 
-It is written to be machine-friendly so other LLMs can quickly discover:
+Everything here is a plain (frozen) dataclass. **Most of it is not used yet**: the "Used by" column says who really imports each class. Stream events live in `contracts.stream`, not here.
 
-- What classes exist
-- Where each class lives
-- Which classes are input contracts vs output contracts
-- Which classes include streaming fields (`AsyncIterator[...]`)
+## Wire format of control endpoints
 
-## Package Purpose
+Every non-stream endpoint answers with `ApiEnvelope` (`contracts/api/common/envelope.py`):
 
-`contracts.api` provides request and response dataclass contracts for microservice operations.
+| field | type |
+|---|---|
+| `action` | `str` |
+| `status` | `"success"` \| `"accepted"` \| `"error"` |
+| `status_code` | `int` |
+| `message` | `str` |
+| `data` | the payload below, or `None` |
+| `timestamp` | `float`, seconds since the epoch (defaults to now) |
 
-High-level layout:
+`data` is one of the response dataclasses in this package. `ApiEnvelope` is used by microphone, STT, TTS, speaker, stepper and ai-agent.
 
-- `contracts.api.common`: shared base contracts and error response contract
-- `contracts.api.microservices.common`: health/readiness/availability contracts
-- `contracts.api.microservices.microphone`: microphone control contracts
-- `contracts.api.microservices.speaker`: speaker contracts
-- `contracts.api.microservices.stepper`: stepper batch and stream contracts
-- `contracts.api.microservices.stt`: speech-to-text contracts
-- `contracts.api.microservices.tts`: text-to-speech contracts
+## `common/`
 
----
+| module | classes | notes |
+|---|---|---|
+| `base.py` | `Command[T]` (`data`, `metadata`), `Result[T]` (`ok`, `message`, `data`, `error_code`, `metadata`) | generic wrappers, not used by a service |
+| `envelope.py` | `ApiEnvelope[T]`, `EnvelopeStatus` | used by six services |
+| `error.py` | `ErrorDetails` (`code`, `message`, `retryable`, `details`), `ErrorResult` (`error`, `context`) | not used by a service |
+| `session.py` | `SessionCreateRequest[ConfigT]` (`config`, `client_id`, `correlation_id`), `SessionCreateResponse` (`session_id`, `state`, `created_at`), `SessionStatusRequest/Response`, `SessionCloseRequest` (`session_id`, `reason`), `SessionCloseResponse` (`session_id`, `closed`, `closed_at`), `SessionState` (`created`, `active`, `closing`, `closed`, `failed`) | base of the `*Session*` contracts below; no service exposes sessions this way |
+| `stream.py` | `ByteStream`, `TextStream`, `StreamDirection` (`inbound`/`outbound`), `StreamBinding`, `ByteStreamProcessor` (protocol) | typing helpers |
 
-## Shared Base Contracts
+## `microservices/common/`
 
-### Module: `contracts.api.common.base`
+| module | request | response | Used by |
+|---|---|---|---|
+| `health_check.py` | `HealthCheckRequest` | `HealthCheckResponse(healthy)` | microphone, STT, TTS, speaker, stepper, ai-agent (`GET /health`) |
+| `availability.py` | `AvailabilityRequest(service_name)` | `AvailabilityResponse(is_available, reason)` | the same, plus Brain (`GET /available`) |
+| `readiness.py` | `ReadinessRequest(component)` | `ReadinessResponse(is_ready, pending_reason)` | speaker |
+| `get_stream.py` | `GetStreamRequest(session_id)` | `GetStreamResponse(stream)` | nobody |
+| `set_stream.py` | `SetStreamRequest(session_id, stream)` | `SetStreamResponse(success, message)` | nobody |
 
-Example import:
+## `microservices/ai_agent/` (since 0.7.0; motion flow since 0.9.0)
 
-```python
-from contracts.api.common.base import BaseRequest, BaseResponse
-```
+| module | classes |
+|---|---|
+| `session.py` | `AIAgentStartSessionRequest(username, email, session_name)`, `AIAgentStartSessionResponse(success, session_id, message, error_code)`, `AIAgentEndSessionRequest(session_id)`, `AIAgentEndSessionResponse(success, message, error_code)`, `AIAgentMessageRequest(session_id, message, robot_context)`, `AIAgentMessageResponse(success, response, directive, message, error_code)` |
+| `motion.py` | `AIAgentMotionMessageResponse(success, response, directives, awaiting_user_input, message, error_code)`: the answer of motion-flow; `directives` is the ordered movement list |
+| `decision.py` | `MotorDirective(arm: left\|right, degrees, direction: forward\|reverse)`, `RobotContext(directives, rejected_reason)` |
 
-#### `BaseRequest[T]`
+Used by Brain and ai-agent. `AIAgentMessageRequest.robot_context` and `RobotContext` are reserved: Brain does not send them, because motion-flow runs after conversation-flow. `AIAgentMessageResponse.directive` is kept for compatibility; conversation-flow never sets it.
 
-- Type: generic frozen dataclass
-- Fields:
-  - `status_code: int`
-  - `detail: str`
-  - `headers: Optional[dict[str, str]]`
-  - `action: str`
-  - `status: str`
-  - `message: str`
-  - `timestamp: float`
-  - `metadata: Optional[dict[str, Any]]`
-  - `data: Optional[T]`
-- Usage:
-  - Wraps request DTOs for all microservice request contracts
-  - The concrete payload is stored in `data`
+## `microservices/microphone/`
 
-#### `BaseResponse[T]`
+`start.py`: `MicrophoneConfig(sample_rate=16000, channels=1, encoding="pcm16", frame_ms=20, chunk_size=1024, device_id)` (used by Brain and microphone), `MicrophoneStartSessionRequest`, `MicrophoneStartSessionResponse(accepted_config)`.
+`stop.py`: `MicrophoneStopSessionRequest`, `MicrophoneStopSessionResponse`.
 
-- Type: generic frozen dataclass
-- Fields: same shape as `BaseRequest[T]`
-- Usage:
-  - Wraps response DTOs for most microservice response contracts
-  - The concrete result payload is stored in `data`
+## `microservices/speaker/`
 
-### Module: `contracts.api.common.exception`
+`start.py`: `SpeakerConfig(sample_rate=24000, channels=1, encoding="pcm16", output_device_id)`, `SpeakerStartSessionRequest`, `SpeakerStartSessionResponse(accepted_config)`.
+`stream.py`: `SpeakerStreamAttachRequest(session_id, direction, chunk_bytes, content_type)`, `SpeakerStreamAttachResponse(session_id, accepted, message)`. Not used by a service.
 
-Example import:
+## `microservices/stepper/`
 
-```python
-from contracts.api.common.exception import ExceptionApiResponse
-```
+`batch.py`: `StepperBatchCommand(stepper_id, action: rotate\|steps\|stop, value, speed, direction)` (not used), `StepperBatchResult(success, message)` (used by Brain and stepper for `/control/{id}/...`).
+`stream.py`: `StepperStreamConfig`, `StepperStartStreamSessionRequest/Response`, `StepperStreamAttachRequest/Response`. Not used: stepper's stream route uses `contracts.stream` events instead of these session contracts.
 
-#### `ExceptionApiResponse[T]`
+## `microservices/stt/`
 
-- Type: generic frozen dataclass
-- Fields: same envelope fields as `BaseRequest` and `BaseResponse`
-- Usage:
-  - Standardized exception/error response envelope
+`process_batch.py`: `STTProcessBatchRequest(audio_data, sample_rate=16000, language, model)`, `STTProcessBatchResponse(text, confidence)` (used by Brain and STT).
+`process_stream.py`: `STTStreamConfig(sample_rate=16000, channels=1, chunk_size=1024, language, model, silence_threshold=150, silence_limit_seconds=2.0)`, `STTProcessStreamSessionRequest/Response`.
+`set_stream.py`: `STTSetStreamRequest/Response`. `get_stream.py`: `STTGetStreamRequest/Response`. The stream and session ones are not used by a service.
 
----
+## `microservices/tts/`
 
-## Common Operational Contracts
+`process_batch.py`: `ProcessBatchRequest(text, sample_rate=22050, channels=1, session_id)`, `ProcessBatchResponse(audio_data_base64, sample_rate, channels)` (the response is used by TTS).
+`set_configuration.py`: `SetConfigurationRequest/Response` and `init_outbound.py`: `InitOutboundRequest/Response`. **Not used, and they describe an OpenAI TTS engine** (voices `alloy`, `nova`, ..., model `gpt-4o-mini-tts`, adapter `openai`) that does not exist in the TTS service, whose engines are Piper and pyttsx3. Treat them as legacy.
 
-### Module: `contracts.api.microservices.common.availability`
+## Notes
 
-Example import:
-
-```python
-from contracts.api.microservices.common.availability import (
-    AvailabilityRequestDTO,
-    AvailabilityRequest,
-    AvailabilityResponseDTO,
-    AvailabilityResponse,
-)
-```
-
-#### `AvailabilityRequestDTO`
-
-- Empty DTO
-- Usage: payload for availability check request
-
-#### `AvailabilityRequest`
-
-- Inherits: `BaseRequest[AvailabilityRequestDTO]`
-- Usage: request envelope for availability check
-
-#### `AvailabilityResponseDTO`
-
-- Fields:
-  - `is_available: bool`
-- Usage: payload indicating availability status
-
-#### `AvailabilityResponse`
-
-- Inherits: `BaseResponse[AvailabilityResponseDTO]`
-- Usage: response envelope for availability check
-
-### Module: `contracts.api.microservices.common.health_check`
-
-Example import:
-
-```python
-from contracts.api.microservices.common.health_check import (
-    HealthCheckRequestDTO,
-    HealthCheckRequest,
-    HealthCheckResponseDTO,
-    HealthCheckResponse,
-)
-```
-
-#### `HealthCheckRequestDTO`
-
-- Empty DTO
-- Usage: payload for health check request
-
-#### `HealthCheckRequest`
-
-- Inherits: `BaseRequest[HealthCheckRequestDTO]`
-- Usage: request envelope for health check
-
-#### `HealthCheckResponseDTO`
-
-- Empty DTO
-- Usage: payload for health check response
-
-#### `HealthCheckResponse`
-
-- Inherits: `BaseResponse[HealthCheckResponseDTO]`
-- Usage: response envelope for health check
-
-### Module: `contracts.api.microservices.common.readiness`
-
-Example import:
-
-```python
-from contracts.api.microservices.common.readiness import (
-    ReadinessRequestDTO,
-    ReadinessRequest,
-    ReadinessResponseDTO,
-    ReadinessResponse,
-)
-```
-
-#### `ReadinessRequestDTO`
-
-- Empty DTO
-- Usage: payload for readiness check request
-
-#### `ReadinessRequest`
-
-- Inherits: `BaseRequest[ReadinessRequestDTO]`
-- Usage: request envelope for readiness check
-
-#### `ReadinessResponseDTO`
-
-- Fields:
-  - `is_ready: bool`
-- Usage: payload indicating readiness status
-
-#### `ReadinessResponse`
-
-- Inherits: `BaseResponse[ReadinessResponseDTO]`
-- Usage: response envelope for readiness check
-
----
-
-## Microphone Contracts
-
-### Module: `contracts.api.microservices.microphone.start`
-
-Example import:
-
-```python
-from contracts.api.microservices.microphone.start import (
-    MicrophoneStartRequestDTO,
-    MicrophoneStartRequest,
-    MicrophoneStartResponseDTO,
-    MicrophoneStartResponse,
-)
-```
-
-#### `MicrophoneStartRequestDTO`
-
-- Fields:
-  - `sample_rate: int = 16000`
-  - `channels: int = 1`
-  - `format: str = "pcm16"`
-- Usage: start microphone stream configuration
-
-#### `MicrophoneStartRequest`
-
-- Inherits: `BaseRequest[MicrophoneStartRequestDTO]`
-- Usage: request envelope for microphone start
-
-#### `MicrophoneStartResponseDTO`
-
-- Fields:
-  - `stream: AsyncIterator[bytes]`
-  - `sample_rate: int`
-- Usage: payload carrying outbound audio stream and rate
-
-#### `MicrophoneStartResponse`
-
-- Inherits: `BaseResponse[MicrophoneStartResponseDTO]`
-- Usage: response envelope for microphone start
-
-### Module: `contracts.api.microservices.microphone.stop`
-
-Example import:
-
-```python
-from contracts.api.microservices.microphone.stop import (
-    MicrophoneStopRequestDTO,
-    MicrophoneStopRequest,
-    MicrophoneStopResponseDTO,
-    MicrophoneStopResponse,
-)
-```
-
-#### `MicrophoneStopRequestDTO`
-
-- Empty DTO
-- Usage: payload to stop microphone stream
-
-#### `MicrophoneStopRequest`
-
-- Inherits: `BaseRequest[MicrophoneStopRequestDTO]`
-- Usage: request envelope for microphone stop
-
-#### `MicrophoneStopResponseDTO`
-
-- Fields:
-  - `success: bool = True`
-- Usage: payload confirming stop operation
-
-#### `MicrophoneStopResponse`
-
-- Inherits: `BaseResponse[MicrophoneStopResponseDTO]`
-- Usage: response envelope for microphone stop
-
----
-
-## Speaker Contracts
-
-### Module: `contracts.api.microservices.speaker.start`
-
-Example import:
-
-```python
-from contracts.api.microservices.speaker.start import (
-    SpeakerStartRequestDTO,
-    SpeakerStartRequest,
-    SpeakerStartResponseDTO,
-    SpeakerStartResponse,
-)
-```
-
-#### `SpeakerStartRequestDTO`
-
-- Fields:
-  - `audio_stream: AsyncIterator[bytes]`
-  - `sample_rate: int = 24000`
-  - `channels: int = 1`
-- Usage: inbound audio stream plus playback configuration
-
-#### `SpeakerStartRequest`
-
-- Inherits: `BaseRequest[SpeakerStartRequestDTO]`
-- Usage: request envelope for speaker start
-
-#### `SpeakerStartResponseDTO`
-
-- Fields:
-  - `success: bool`
-  - `message: str`
-- Usage: payload confirming speaker start handling
-
-#### `SpeakerStartResponse`
-
-- Inherits: `BaseResponse[SpeakerStartResponseDTO]`
-- Usage: response envelope for speaker start
-
----
-
-## Stepper Contracts
-
-### Module: `contracts.api.microservices.stepper.batch`
-
-Example import:
-
-```python
-from contracts.api.microservices.stepper.batch import (
-    StepperBatchStartRequestDTO,
-    StepperBatchStartRequest,
-    StepperBatchStartResponseDTO,
-    StepperBatchStartResponse,
-)
-```
-
-#### `StepperBatchStartRequestDTO`
-
-- Fields:
-  - `stepper_id: str`
-  - `action: str`
-  - `value: float = 0.0`
-  - `speed: float = 0.0`
-  - `direction: str = "forward"`
-- Usage: single batch command input for stepper motor
-
-#### `StepperBatchStartRequest`
-
-- Inherits: `BaseRequest[StepperBatchStartRequestDTO]`
-- Usage: request envelope for stepper batch operation
-
-#### `StepperBatchStartResponseDTO`
-
-- Fields:
-  - `success: bool`
-  - `message: str`
-- Usage: payload with batch execution result
-
-#### `StepperBatchStartResponse`
-
-- Inherits: `BaseResponse[StepperBatchStartResponseDTO]`
-- Usage: response envelope for stepper batch operation
-
-### Module: `contracts.api.microservices.stepper.stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.stepper.stream import (
-    StepperStreamRequestDTO,
-    StepperStreamRequest,
-    StepperStreamResponseDTO,
-    StepperStreamResponse,
-)
-```
-
-#### `StepperStreamRequestDTO`
-
-- Fields:
-  - `stepper_id: str`
-  - `command_stream: AsyncIterator[dict[str, Any]]`
-- Usage: streamed command input for stepper control
-
-#### `StepperStreamRequest`
-
-- Inherits: `BaseRequest[StepperStreamRequestDTO]`
-- Usage: request envelope for stepper stream operation
-
-#### `StepperStreamResponseDTO`
-
-- Fields:
-  - `success: bool`
-  - `message: str`
-- Usage: payload with stream processing acceptance/result
-
-#### `StepperStreamResponse`
-
-- Inherits: `BaseResponse[StepperStreamResponseDTO]`
-- Usage: response envelope for stepper stream operation
-
----
-
-## STT Contracts
-
-### Module: `contracts.api.microservices.stt.process_batch`
-
-Example import:
-
-```python
-from contracts.api.microservices.stt.process_batch import (
-    STTProcessBatchStartRequestDTO,
-    STTProcessBatchStartRequest,
-    STTProcessBatchStartResponseDTO,
-    STTProcessBatchStartResponse,
-)
-```
-
-#### `STTProcessBatchStartRequestDTO`
-
-- Fields:
-  - `audio_data: bytes`
-  - `sample_rate: int = 16000`
-- Usage: batch STT input audio bytes
-
-#### `STTProcessBatchStartRequest`
-
-- Inherits: `BaseRequest[STTProcessBatchStartRequestDTO]`
-- Usage: request envelope for batch STT
-
-#### `STTProcessBatchStartResponseDTO`
-
-- Fields:
-  - `text: str`
-- Usage: transcription output text
-
-#### `STTProcessBatchStartResponse`
-
-- Inherits: `BaseResponse[STTProcessBatchStartResponseDTO]`
-- Usage: response envelope for batch STT
-
-### Module: `contracts.api.microservices.stt.process_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.stt.process_stream import (
-    STTProcessStreamStartRequestDTO,
-    STTProcessStreamStartRequest,
-    STTProcessStreamStartResponseDTO,
-    STTProcessStreamStartResponse,
-)
-```
-
-#### `STTProcessStreamStartRequestDTO`
-
-- Fields:
-  - `audio_stream: AsyncIterator[bytes]`
-  - `sample_rate: int = 16000`
-  - `chunk_size: int = 1024`
-  - `silence_threshold: int = 150`
-  - `silence_limit_seconds: float = 2.0`
-- Usage: streaming STT input and stream processing configuration
-
-#### `STTProcessStreamStartRequest`
-
-- Inherits: `BaseRequest[STTProcessStreamStartRequestDTO]`
-- Usage: request envelope for stream STT processing
-
-#### `STTProcessStreamStartResponseDTO`
-
-- Fields:
-  - `text_stream: AsyncIterator[str]`
-- Usage: streamed transcription output
-
-#### `STTProcessStreamStartResponse`
-
-- Inherits: `BaseResponse[STTProcessStreamStartResponseDTO]`
-- Usage: response envelope for stream STT processing
-
-### Module: `contracts.api.microservices.stt.set_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.stt.set_stream import (
-    STTSetStreamStartRequestDTO,
-    STTSetStreamStartRequest,
-    STTSetStreamStartResponseDTO,
-    STTSetStreamStartResponse,
-)
-```
-
-#### `STTSetStreamStartRequestDTO`
-
-- Fields:
-  - `audio_stream: AsyncIterator[bytes]`
-  - `sample_rate: int = 16000`
-  - `chunk_size: int = 1024`
-  - `silence_threshold: int = 150`
-  - `silence_limit_seconds: float = 2.0`
-- Usage: set inbound audio stream for STT session/flow
-
-#### `STTSetStreamStartRequest`
-
-- Inherits: `BaseRequest[STTSetStreamStartRequestDTO]`
-- Usage: request envelope for setting STT stream
-
-#### `STTSetStreamStartResponseDTO`
-
-- Fields:
-  - `accepted: bool`
-- Usage: acknowledgment that stream was accepted
-
-#### `STTSetStreamStartResponse`
-
-- Inherits: `BaseResponse[STTSetStreamStartResponseDTO]`
-- Usage: response envelope for set-stream operation
-
-### Module: `contracts.api.microservices.stt.get_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.stt.get_stream import (
-    STTGetStreamStartRequestDTO,
-    STTGetStreamStartRequest,
-    STTGetStreamStartResponseDTO,
-    STTGetStreamStartResponse,
-)
-```
-
-#### `STTGetStreamStartRequestDTO`
-
-- Empty DTO
-- Usage: request payload for obtaining STT text stream
-
-#### `STTGetStreamStartRequest`
-
-- Inherits: `BaseRequest[STTGetStreamStartRequestDTO]`
-- Usage: request envelope for get-stream operation
-
-#### `STTGetStreamStartResponseDTO`
-
-- Fields:
-  - `text_stream: AsyncIterator[str]`
-- Usage: outbound text stream payload
-
-#### `STTGetStreamStartResponse`
-
-- Inherits: `BaseResponse[STTGetStreamStartResponseDTO]`
-- Usage: response envelope for get-stream operation
-
----
-
-## TTS Contracts
-
-### Module: `contracts.api.microservices.tts.process_batch`
-
-Example import:
-
-```python
-from contracts.api.microservices.tts.process_batch import (
-    TTSProcessBatchRequestDTO,
-    TTSProcessBatchRequest,
-    TTSProcessBatchResponseDTO,
-    TTSProcessBatchResponse,
-)
-```
-
-#### `TTSProcessBatchRequestDTO`
-
-- Fields:
-  - `text: str`
-  - `sample_rate: int = 22050`
-  - `channels: int = 1`
-- Usage: batch TTS synthesis input
-
-#### `TTSProcessBatchRequest`
-
-- Inherits: `BaseRequest[TTSProcessBatchRequestDTO]`
-- Usage: request envelope for batch TTS
-
-#### `TTSProcessBatchResponseDTO`
-
-- Fields:
-  - `audio_data_base64: str`
-  - `sample_rate: int`
-  - `channels: int`
-- Usage: synthesized audio payload encoded as base64
-
-#### `TTSProcessBatchResponse`
-
-- Inherits: `BaseResponse[TTSProcessBatchResponseDTO]`
-- Usage: response envelope for batch TTS
-
-### Module: `contracts.api.microservices.tts.process_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.tts.process_stream import (
-    TTSProcessRequestDTO,
-    TTSProcessRequest,
-    TTSProcessResponseDTO,
-    TTSProcessResponse,
-)
-```
-
-#### `TTSProcessRequestDTO`
-
-- Fields:
-  - `text_stream: AsyncIterator[bytes]`
-  - `sample_rate: int = 22050`
-  - `channels: int = 1`
-- Usage: streaming text input plus output audio configuration
-
-#### `TTSProcessRequest`
-
-- Inherits: `BaseRequest[TTSProcessRequestDTO]`
-- Usage: request envelope for stream TTS processing
-
-#### `TTSProcessResponseDTO`
-
-- Fields:
-  - `content: AsyncIterator[str] | AsyncIterator[bytes]`
-  - `media_type: str`
-  - `status_code: int`
-  - `headers: dict[str, str]`
-- Usage: outbound stream payload and HTTP-style metadata
-
-#### `TTSProcessResponse`
-
-- Inherits: `TTSProcessResponseDTO`
-- Usage: concrete response class for stream TTS
-
-### Module: `contracts.api.microservices.tts.set_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.tts.set_stream import (
-    TTSSetStreamRequestDTO,
-    TTSSetStreamRequest,
-    TTSSetStreamResponseDTO,
-    TTSSetStreamResponse,
-)
-```
-
-#### `TTSSetStreamRequestDTO`
-
-- Fields:
-  - `text_stream: AsyncIterator[str]`
-  - `sample_rate: int = 22050`
-  - `channels: int = 1`
-- Usage: set inbound text stream for TTS processing
-
-#### `TTSSetStreamRequest`
-
-- Inherits: `BaseRequest[TTSSetStreamRequestDTO]`
-- Usage: request envelope for set-stream operation
-
-#### `TTSSetStreamResponseDTO`
-
-- Fields:
-  - `content: AsyncIterator[str] | AsyncIterator[bytes]`
-  - `media_type: str`
-  - `status_code: int`
-  - `headers: dict[str, str]`
-- Usage: outbound stream payload and HTTP-style metadata
-
-#### `TTSSetStreamResponse`
-
-- Inherits: `TTSSetStreamResponseDTO`
-- Usage: concrete response class for set-stream response
-
-### Module: `contracts.api.microservices.tts.get_stream`
-
-Example import:
-
-```python
-from contracts.api.microservices.tts.get_stream import (
-    TTSGetStreamRequestDTO,
-    TTSGetStreamRequest,
-    TTSGetStreamResponseDTO,
-    TTSGetStreamResponse,
-)
-```
-
-#### `TTSGetStreamRequestDTO`
-
-- Empty DTO
-- Usage: request payload for fetching TTS output stream
-
-#### `TTSGetStreamRequest`
-
-- Inherits: `BaseRequest[TTSGetStreamRequestDTO]`
-- Usage: request envelope for get-stream operation
-
-#### `TTSGetStreamResponseDTO`
-
-- Fields:
-  - `content: AsyncIterator[str] | AsyncIterator[bytes]`
-  - `media_type: str`
-  - `status_code: int`
-  - `headers: dict[str, str]`
-- Usage: outbound stream payload and HTTP-style metadata
-
-#### `TTSGetStreamResponse`
-
-- Inherits: `TTSGetStreamResponseDTO`
-- Usage: concrete response class for get-stream response
-
----
-
-## Minimal Usage Patterns
-
-### Create request envelope with DTO payload
-
-```python
-from contracts.api.microservices.tts.process_batch import (
-    TTSProcessBatchRequest,
-    TTSProcessBatchRequestDTO,
-)
-
-request = TTSProcessBatchRequest(
-    status_code=200,
-    detail="ok",
-    headers=None,
-    action="tts.process_batch",
-    status="accepted",
-    message="start",
-    timestamp=0.0,
-    metadata={"trace_id": "abc"},
-    data=TTSProcessBatchRequestDTO(text="Hello world"),
-)
-```
-
-### Create response envelope with DTO result
-
-```python
-from contracts.api.microservices.stt.process_batch import (
-    STTProcessBatchStartResponse,
-    STTProcessBatchStartResponseDTO,
-)
-
-response = STTProcessBatchStartResponse(
-    status_code=200,
-    detail="ok",
-    headers=None,
-    action="stt.process_batch",
-    status="completed",
-    message="done",
-    timestamp=0.0,
-    metadata=None,
-    data=STTProcessBatchStartResponseDTO(text="transcribed text"),
-)
-```
-
----
-
-## Notes for LLM Consumers
-
-- Most operations follow this pattern:
-  - `XxxRequestDTO` -> domain payload
-  - `XxxRequest` -> `BaseRequest[XxxRequestDTO]`
-  - `XxxResponseDTO` -> result payload
-  - `XxxResponse` -> `BaseResponse[XxxResponseDTO]`
-- Streaming operations use `AsyncIterator[...]` in DTO fields.
-- TTS streaming responses (`get_stream`, `set_stream`, `process_stream`) currently use response classes that inherit DTO classes directly instead of `BaseResponse[...]`.
-- All `__init__.py` files are currently empty package markers.
+- Audio on any `*_base64` field is raw PCM16 mono and is never converted between services.
+- A consumer-side check of "who imports what" was a scoped grep of `from contracts.api...` imports in each service (excluding venvs and `vendor/`) on 2026-10-01; it does not see dynamic imports.

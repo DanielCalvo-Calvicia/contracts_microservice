@@ -320,10 +320,10 @@ def make_brain(ports: dict[str, int]) -> Brain:
     brain_dir = str(REPO / "brain_microservice")
     if brain_dir not in sys.path:
         sys.path.insert(0, brain_dir)
-    from application.services.service import BrainService
-    from infrastructure.outbound.http.ai_agent.ai_agent_adapter import HttpAIAgentAdapter
-    from infrastructure.outbound.http.ai_agent.motion_agent_adapter import HttpMotionAgentAdapter
-    from infrastructure.outbound.http.base import HttpServiceConfig
+    from application.services.brain_service import BrainService
+    from infrastructure.outbound.http.ai_agent.conversation_flow_adapter import HttpConversationFlowAdapter
+    from infrastructure.outbound.http.ai_agent.motion_flow_adapter import HttpMotionFlowAdapter
+    from infrastructure.outbound.http.http_client import HttpServiceConfig
     from infrastructure.outbound.http.microphone.microphone_adapter import HttpMicrophoneAdapter
     from infrastructure.outbound.http.speaker.speaker_adapter import HttpSpeakerAdapter
     from infrastructure.outbound.http.stepper.stepper_adapter import HttpStepperAdapter
@@ -338,15 +338,16 @@ def make_brain(ports: dict[str, int]) -> Brain:
         "stt": HttpSTTAdapter(config("stt")),
         "tts": HttpTTSAdapter(config("tts")),
         "speaker": HttpSpeakerAdapter(config("speaker")),
-        "ai_agent": HttpAIAgentAdapter(config("ai_agent")),
+        "ai_agent": HttpConversationFlowAdapter(config("ai_agent")),
         "stepper": HttpStepperAdapter(
             config("stepper"), left_arm_stepper_id="stepper_1", right_arm_stepper_id="stepper_2", default_rpm=15.0
         ),
     }
     tts, speaker = TTSTap(real["tts"]), SpeakerTap(real["speaker"])
     ai_agent, stepper = AIAgentTap(real["ai_agent"]), StepperTap(real["stepper"])
-    motion = MotionTap(HttpMotionAgentAdapter(config("ai_agent")))  # motion-flow: the same service, its own routes
-    service = BrainService(real["microphone"], real["stt"], tts, speaker, ai_agent, stepper, motion)
+    motion = MotionTap(HttpMotionFlowAdapter(config("ai_agent")))  # motion-flow: the same service, its own routes
+    # conversation-flow first, motion-flow only when it has ended; Brain says "message received" / "thinking" meanwhile
+    service = BrainService(real["microphone"], real["stt"], tts, speaker, stepper, (ai_agent, motion))
     return Brain(service, ai_agent, motion, stepper, tts, speaker, list(real.values()))
 
 
@@ -380,6 +381,14 @@ def scenario(stack: Stack, speech, phrase: str, *, wait_for_move: bool = False, 
     return brain, result
 
 
+def _answers(brain: Brain) -> list[str]:
+    """What TTS was told to say, without the progress messages Brain says while ai-agent's flows work."""
+    from application.services.progress import ProgressMessages
+
+    progress = ProgressMessages()
+    return [text for text in brain.tts.spoken if text not in (progress.received, progress.thinking)]
+
+
 def _heard(brain: Brain) -> str:
     return " ".join(brain.ai_agent.transcripts).lower()
 
@@ -393,8 +402,9 @@ def test_a_greeting_is_understood_answered_and_spoken_without_moving_anything(li
     assert result.success, result.message
     assert "hello" in _heard(brain)  # real whisper understood the synthesized speech
     (reply,) = brain.ai_agent.replies  # real LLM
-    assert reply.success and reply.response.strip() and not brain.motion.replies[0].directives
-    assert brain.tts.spoken == [reply.response.strip()]  # what real TTS was told to say
+    assert reply.success and reply.spoken.strip() and not brain.motion.replies[0].directives
+    assert brain.tts.spoken[0] == "Message received."  # the user hears at once that the message arrived ...
+    assert _answers(brain) == [reply.spoken.strip()]  # ... and then what real TTS was told to say
     assert brain.speaker.pcm_bytes > 24000  # real audio reached the real speaker (>0.5 s at 24 kHz)
     assert brain.speaker.responses[0].success
     assert not brain.stepper.results and not brain.stepper.errors
@@ -408,10 +418,10 @@ def test_a_movement_request_moves_the_left_arm_on_the_real_stepper_service(live,
     assert "left" in _heard(brain)
     (reply,) = brain.ai_agent.replies
     (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
+    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
     (directive,) = motion.directives
     assert (directive.arm, directive.degrees, directive.direction) == ("left", 90.0, "forward")
-    assert brain.tts.spoken == [reply.response.strip()]
+    assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
     (move,) = brain.stepper.results  # answered by the real stepper service (0.25 rev * 200 = 50 steps)
     assert move.success and "50 steps" in move.message, move
@@ -423,7 +433,7 @@ def test_a_backwards_request_for_the_right_arm_reaches_the_other_stepper(live, s
 
     assert result.success, result.message
     (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
+    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
     (directive,) = motion.directives
     assert (directive.arm, directive.degrees, directive.direction) == ("right", 45.0, "reverse")
     (move,) = brain.stepper.results  # 45 degrees = 0.125 rev * 200 = 25 steps
@@ -437,7 +447,7 @@ def test_a_sequence_moves_the_arm_there_and_back_in_order_on_the_real_stepper_se
 
     assert result.success, result.message
     (motion,) = brain.motion.replies
-    assert len(motion.directives) == 2, f"motion-flow planned {motion.directives!r}: {motion.response!r}"
+    assert len(motion.directives) == 2, f"motion-flow planned {motion.directives!r}: {motion.spoken!r}"
     first, second = motion.directives
     assert (first.arm, first.degrees) == ("left", 90.0) and second.arm == "left"
     # "there and back": the second movement undoes the first, as a negative number of degrees or as the other direction
@@ -451,8 +461,8 @@ def test_something_the_robot_cannot_do_is_refused_out_loud_and_nothing_moves(liv
 
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
-    assert reply.success and reply.response.strip() and not brain.motion.replies[0].directives
-    assert brain.tts.spoken == [reply.response.strip()]
+    assert reply.success and reply.spoken.strip() and not brain.motion.replies[0].directives
+    assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert not brain.stepper.results and not brain.stepper.errors
     run(brain.close())
@@ -461,11 +471,11 @@ def test_something_the_robot_cannot_do_is_refused_out_loud_and_nothing_moves(liv
 def test_a_second_conversation_reuses_the_same_ai_agent_session(live, speech):
     brain = make_brain(live.ports)
     _, first = scenario(live, speech, "Hello.", brain=brain)
-    session = brain.service._ai_agent_session_id
+    session = brain.service.agent_flows[0].session_id
     _, second = scenario(live, speech, "Good morning.", brain=brain)
 
     assert first.success and second.success
-    assert session and brain.service._ai_agent_session_id == session
+    assert session and brain.service.agent_flows[0].session_id == session
     assert len(brain.ai_agent.replies) == 2 and all(r.success for r in brain.ai_agent.replies)
     run(brain.close())
 
@@ -484,7 +494,7 @@ def test_brain_reconnects_when_the_real_ai_agent_restarts_and_forgets_its_sessio
     stack = fresh()
     brain = make_brain(stack.ports)
     _, first = scenario(stack, speech, "Hello.", brain=brain)
-    session = brain.service._ai_agent_session_id
+    session = brain.service.agent_flows[0].session_id
     assert first.success and session
 
     stack.restart("ai_agent")  # a real process restart: its in-memory sessions are gone
@@ -494,7 +504,7 @@ def test_brain_reconnects_when_the_real_ai_agent_restarts_and_forgets_its_sessio
     codes = [r.error_code for r in brain.ai_agent.replies]
     assert "SESSION_NOT_FOUND" in codes  # the stale session was refused...
     assert brain.ai_agent.replies[-1].success  # ...and Brain opened a new one and got a real answer
-    assert brain.service._ai_agent_session_id not in (None, session)
+    assert brain.service.agent_flows[0].session_id not in (None, session)
     run(brain.close())
 
 
@@ -502,10 +512,10 @@ def test_a_real_ai_agent_that_is_down_is_answered_with_the_fallback_apology(fres
     stack = fresh([s for s in ALL_SERVICES if s != "ai_agent"])
     brain, result = scenario(stack, speech, "Hello.")
 
-    from application.services.routes.stream_internal.stt_to_tts import _AI_AGENT_UNREACHABLE_APOLOGY
+    from application.services.voice_pipeline.bridges.stt_to_tts import _AI_AGENT_UNREACHABLE_APOLOGY
 
     assert result.success, result.message  # the pipeline survived
-    assert brain.tts.spoken == [_AI_AGENT_UNREACHABLE_APOLOGY]
+    assert _answers(brain) == [_AI_AGENT_UNREACHABLE_APOLOGY]
     assert brain.speaker.pcm_bytes > 24000  # and the apology really came out of the real speaker
     assert not brain.stepper.results
     run(brain.close())
@@ -518,8 +528,8 @@ def test_a_real_stepper_that_is_down_does_not_change_what_is_said(fresh, speech)
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
     (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
-    assert brain.tts.spoken == [reply.response.strip()]
+    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
+    assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert brain.stepper.errors and not brain.stepper.results  # the move was attempted and failed alone
     run(brain.close())

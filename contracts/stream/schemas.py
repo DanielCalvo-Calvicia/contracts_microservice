@@ -57,9 +57,21 @@ from contracts.stream.microservices.stepper.inbound.partial import (
     StepperPartialInboundEvent,
     StepperPartialInboundEventDTO,
 )
+from contracts.stream.microservices.stepper.inbound.stream_started import (
+    StepperStreamStartedInboundEvent,
+    StepperStreamStartedInboundEventDTO,
+)
 from contracts.stream.microservices.stepper.outbound.completed import (
     StepperCompletedOutboundEvent,
     StepperCompletedOutboundEventDTO,
+)
+from contracts.stream.microservices.stepper.outbound.partial import (
+    StepperPartialOutboundEvent,
+    StepperPartialOutboundEventDTO,
+)
+from contracts.stream.microservices.stepper.outbound.stream_started import (
+    StepperStreamStartedOutboundEvent,
+    StepperStreamStartedOutboundEventDTO,
 )
 from contracts.stream.microservices.stt.inbound.completed import (
     STTCompletedInboundEvent,
@@ -174,12 +186,13 @@ SPEAKER_OUTBOUND = StreamSchema(
     },
 )
 
-# Stepper's stream endpoint (``/process/stream/{id}/set``) is not implemented yet (commands are
-# read and discarded, see StepperService.execute_stream): these schemas exist for when it is, and
-# carry no ``stream_started`` event because none is defined for stepper yet.
+# Stepper's stream endpoint (``/process/stream/{id}/set``): Brain (or any sender) streams motor
+# commands as ``partial`` events and the service answers, per command, with a ``partial`` result and
+# closes with ``completed``. The upload also carries ``stream_started`` so the motor is named once.
 STEPPER_INBOUND = StreamSchema(
     "stepper.inbound",
     {
+        EventType.START_STREAM: (StepperStreamStartedInboundEvent, StepperStreamStartedInboundEventDTO),
         EventType.PARTIAL: (StepperPartialInboundEvent, StepperPartialInboundEventDTO),
         EventType.COMPLETED: (StepperCompletedInboundEvent, StepperCompletedInboundEventDTO),
     },
@@ -188,6 +201,8 @@ STEPPER_INBOUND = StreamSchema(
 STEPPER_OUTBOUND = StreamSchema(
     "stepper.outbound",
     {
+        EventType.START_STREAM: (StepperStreamStartedOutboundEvent, StepperStreamStartedOutboundEventDTO),
+        EventType.PARTIAL: (StepperPartialOutboundEvent, StepperPartialOutboundEventDTO),
         EventType.COMPLETED: (StepperCompletedOutboundEvent, StepperCompletedOutboundEventDTO),
     },
 )

@@ -210,3 +210,53 @@ def test_input_completed_is_a_common_event_that_cannot_be_mistaken_for_content()
         decoded = decode_event(encode_ndjson(event), schema)
         assert decoded.type is EventType.INPUT_COMPLETED and decoded.payload.reason == "end_of_input"
     assert EventType.INPUT_COMPLETED is not EventType.COMPLETED
+
+
+def test_stepper_streams_carry_commands_in_and_results_out() -> None:
+    from contracts.stream.microservices.stepper.inbound.partial import (
+        StepperPartialInboundEvent,
+        StepperPartialInboundEventDTO,
+    )
+    from contracts.stream.microservices.stepper.inbound.stream_started import (
+        StepperStreamStartedInboundEvent,
+        StepperStreamStartedInboundEventDTO,
+    )
+    from contracts.stream.microservices.stepper.outbound.completed import (
+        StepperCompletedOutboundEvent,
+        StepperCompletedOutboundEventDTO,
+    )
+    from contracts.stream.microservices.stepper.outbound.partial import (
+        StepperPartialOutboundEvent,
+        StepperPartialOutboundEventDTO,
+    )
+    from contracts.stream.microservices.stepper.outbound.stream_started import (
+        StepperStreamStartedOutboundEvent,
+        StepperStreamStartedOutboundEventDTO,
+    )
+
+    inbound = EventSequencer()
+    body = b"".join(
+        encode_ndjson(event)
+        for event in (
+            inbound.next(StepperStreamStartedInboundEvent, StepperStreamStartedInboundEventDTO(stepper_id="stepper_1")),
+            inbound.next(StepperPartialInboundEvent, StepperPartialInboundEventDTO(action="rotate", rotations=0.25, rpm=15)),
+            inbound.next(StepperPartialInboundEvent, StepperPartialInboundEventDTO(action="stop")),
+        )
+    )
+    decoded = list(NdjsonDecoder(schemas.STEPPER_INBOUND).feed(body))
+    assert [e.type for e in decoded] == [EventType.START_STREAM, EventType.PARTIAL, EventType.PARTIAL]
+    assert decoded[1].payload.rotations == 0.25 and decoded[1].payload.direction == "forward"
+    assert decoded[2].payload.steps == 0.0
+
+    outbound = EventSequencer()
+    answer = b"".join(
+        encode_ndjson(event)
+        for event in (
+            outbound.next(StepperStreamStartedOutboundEvent, StepperStreamStartedOutboundEventDTO(message="ready")),
+            outbound.next(StepperPartialOutboundEvent, StepperPartialOutboundEventDTO(action="rotate", success=True, message="done")),
+            outbound.next(StepperCompletedOutboundEvent, StepperCompletedOutboundEventDTO(message="finished")),
+        )
+    )
+    events = list(NdjsonDecoder(schemas.STEPPER_OUTBOUND).feed(answer))
+    assert [e.type for e in events] == [EventType.START_STREAM, EventType.PARTIAL, EventType.COMPLETED]
+    assert events[1].payload.success is True

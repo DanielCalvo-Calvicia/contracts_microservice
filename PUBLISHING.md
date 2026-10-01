@@ -1,173 +1,47 @@
-# Publishing `contracts_microservice`
+# Publishing `contracts-microservice`
 
-This repository is a Python package that exposes the `contracts` package. The import path used by downstream services must come from the built wheel or a Git-based installation of this repository, not from a bare `.py` file copy.
+How a change to this package reaches the services. Rewritten on 2026-10-01 to match what the workspace really does: **the services do not install contracts from a package index or from Git; each carries a bundled wheel in its own `vendor/` folder.** The older text of this file described a PyPI/Git flow that nothing uses.
 
-The most important rule is this: if you add, remove, or rename modules under `contracts/`, you must build and publish a new package version, then update the consuming microservice to pin that new version, commit, or tag.
+## The rule
+
+If you add, remove, rename or change anything under `contracts/contracts/`, then in this order:
+
+1. Bump `version` in `pyproject.toml`. Use a new version for every change; a reused version can leave a stale wheel in a consumer's cache.
+2. From the workspace root run `brain_microservice\windows\Scripts\python.exe contracts\scripts\bundle.py`. It builds the wheel (`pip wheel --no-deps`) and copies it to `<service>/vendor/` of every consumer, deleting the older `contracts_microservice-*.whl` there.
+3. Update the wheel file name in each consumer's requirements files (`./vendor/contracts_microservice-<version>-py3-none-any.whl`). The script prints the name to use.
+4. Update producers and consumers, add a conformance test per service, extend the e2e tests.
+5. Run `brain_microservice\windows\Scripts\python.exe -m pytest contracts\tests -q`. `tests/test_bundled_wheels.py` fails when a bundled wheel is missing, stale or differs from the source, or when a requirements file does not reference the current wheel (or still has `-e ../contracts`).
+6. Reinstall in each service venv (`pip install ./vendor/<wheel>`) to see the change at runtime. Editable installs of `./contracts` are fine for development but are not what ships.
+
+## Consumers
+
+`SERVICE_FOLDERS` in `scripts/bundle.py` (and in `tests/test_bundled_wheels.py`): `brain_microservice`, `microphone_microservice`, `speaker_microservice`, `stt_microservice`, `tts_microservice`, `ai-agent`, `stepper_microservice`. A new consumer must be added to both lists.
 
 ## Package layout
 
-The source tree is rooted at `contracts/`, which is the import package name.
+The source tree is rooted at `contracts/`, the import package. `pyproject.toml` discovers packages with `include = ["contracts*"]`, so **every package directory needs an `__init__.py`**, and `py.typed` is shipped as package data.
 
-Expected structure:
-
-- `contracts/__init__.py`
-- `contracts/api/__init__.py`
-- `contracts/api/common/__init__.py`
-- `contracts/api/microservices/...`
-- `contracts/stream/__init__.py`
-- `contracts/stream/common/__init__.py`
-- `contracts/stream/microservices/...`
-
-Every package directory must contain an `__init__.py`. Setuptools discovers these packages from `pyproject.toml` using the `contracts*` include pattern.
-
-## Why changes may not show up after `git push`
-
-If another service installs this project through pip, changes are only visible when one of these happens:
-
-- the consuming service installs a new Git commit, branch ref, or tag that contains your changes
-- the package version is bumped and a new wheel is built and published
-- the consuming environment is not reusing an old cached wheel or locked dependency
-
-If a downstream service still references the old tag, old commit, or old version number, it will keep installing the old code even after you push new source changes.
-
-## How to publish correctly
-
-### 1. Make sure the package metadata is correct
-
-Confirm that `pyproject.toml` includes the package discovery rule:
-
-```toml
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["contracts*"]
+```text
+contracts/__init__.py
+contracts/api/{__init__.py, common/, microservices/<name>/}
+contracts/stream/{__init__.py, codec.py, schemas.py, common/, microservices/<name>/}
 ```
 
-This is what ensures that `contracts/api/common/health_check.py`, `contracts/api/common/base.py`, and every other submodule are included in the wheel.
-
-### 2. Bump the package version
-
-Before publishing, change the version in `pyproject.toml`.
-
-Example:
-
-```toml
-[project]
-name = "contracts-microservice"
-version = "0.1.1"
-```
-
-Use a new version for every published change. If you reuse the same version, some consumers may keep the old artifact.
-
-### 3. Build the distribution locally
-
-From the repository root:
+## Checking the wheel
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade build
-.\.venv\Scripts\python.exe -m build
+brain_microservice\windows\Scripts\python.exe -m zipfile -l tts_microservice\vendor\contracts_microservice-<version>-py3-none-any.whl
 ```
 
-This creates:
-
-- `dist/contracts_microservice-<version>.tar.gz`
-- `dist/contracts_microservice-<version>-py3-none-any.whl`
-
-### 4. Verify the wheel contents
-
-Inspect the wheel before publishing it:
-
-```powershell
-.\.venv\Scripts\python.exe -m zipfile -l dist\contracts_microservice-<version>-py3-none-any.whl | Select-String "contracts/api/common/health_check.py"
-.\.venv\Scripts\python.exe -m zipfile -l dist\contracts_microservice-<version>-py3-none-any.whl | Select-String "contracts/api/common/base.py"
-```
-
-You should see the module paths listed explicitly.
-
-### 5. Publish the artifact
-
-You have two common options:
-
-- publish the wheel to an internal package index or PyPI-compatible feed
-- consume the repository directly from Git in the downstream microservice
-
-For a Git-based dependency, pin a commit or tag:
-
-```txt
-git+https://github.com/DanielCalvo-Calvicia/contracts_microservice.git@<tag-or-commit>
-```
-
-Using a tag is preferred for release stability. Using a commit hash is acceptable for precise reproducibility.
-
-## How another microservice should install it
-
-### Option A: install from a wheel
-
-If you publish the wheel to an artifact feed, downstream services can install it with:
-
-```txt
-contracts-microservice==0.1.1
-```
-
-### Option B: install directly from Git
-
-In `requirements.windows.txt` or `requirements.linux.txt`:
-
-```txt
-git+https://github.com/DanielCalvo-Calvicia/contracts_microservice.git@v0.1.1
-```
-
-If you need to pin to an exact commit, use:
-
-```txt
-git+https://github.com/DanielCalvo-Calvicia/contracts_microservice.git@<commit-sha>
-```
-
-### Option C: install from a local editable checkout during development
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e .
-```
-
-Editable installs are useful for development, but they are not a substitute for publishing a release artifact.
-
-## How to verify the package installs correctly
-
-After publishing or installing the wheel, validate the import path in a clean environment:
-
-```powershell
-.\.venv\Scripts\python.exe -c "import contracts; import contracts.api.common.base as base; print(contracts.__file__); print(base.__file__)"
-```
-
-For the new health check module, verify:
-
-```powershell
-.\.venv\Scripts\python.exe -c "import contracts.api.microservices.common.health_check as health_check; print(health_check.__file__)"
-```
-
-## Recommended release checklist
-
-1. Update or add the module under `contracts/`.
-2. Confirm the directory has an `__init__.py` if it is a package.
-3. Update `pyproject.toml` version.
-4. Build the wheel with `python -m build`.
-5. Inspect the wheel with `python -m zipfile -l`.
-6. Publish the wheel or tag the Git commit.
-7. Update the downstream microservice to point at the new version, tag, or commit.
-8. Reinstall in a clean environment and re-run the import check.
+Expected: the module paths of `contracts/...` are listed. A wheel with only a `.dist-info` means package discovery failed.
 
 ## Troubleshooting
 
-- If the wheel only contains `.dist-info`, package discovery is wrong and setuptools is not finding `contracts/`.
-- If `pip install` still shows old code, the downstream service is probably pinned to an old version, tag, or commit.
-- If `from contracts.api.common.base import Base` fails, the file is present but the symbol name is wrong; `base.py` currently defines `BaseRequest` and `BaseResponse`, not `Base`.
-- If the import works locally but not in CI, check whether CI is installing from a stale cache or an old lock file.
+- A service still behaves like the old contract: it has an old wheel installed in its venv, or its requirements still name the old wheel. Reinstall from `vendor/`.
+- `test_bundled_wheels.py` says "differs from /contracts": you edited a file after bundling (or edited a bundled copy). Run `bundle.py` again.
+- Mypy cannot see `contracts`: install it editable in compat mode, `pip install -e ./contracts --config-settings editable_mode=compat`.
+- `bundle.py` and `contracts/build/`, `dist/`, `*.egg-info` are generated; do not edit or commit them by hand.
 
-## Current repository note
+## Not used
 
-This repository packages the `contracts` namespace. Downstream code should import the module path that actually exists, for example:
-
-```python
-from contracts.api.common.base import BaseRequest, BaseResponse
-```
-
-not a symbol named `Base` unless that symbol is explicitly defined in the module.
+Publishing to PyPI or an internal index, and installing from `git+https://github.com/DanielCalvo-Calvicia/contracts.git@<tag>` (the remote of this repo is `https://github.com/DanielCalvo-Calvicia/contracts.git`), are possible in principle but are not the workflow here and were not tried.
