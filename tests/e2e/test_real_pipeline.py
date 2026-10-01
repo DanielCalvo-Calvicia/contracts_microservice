@@ -2,7 +2,7 @@
 
     speech WAV -> real microphone service -> real STT (whisper) -> Brain -> real ai-agent (real LLM):
                motion-flow (which movements?) then conversation-flow (what to say)
-               -> Brain -> real TTS (SAPI) -> real speaker (plays out loud)
+               -> Brain -> real TTS -> real speaker (plays out loud)
                        \\-> real stepper service (its own mock-hardware mode) on a movement decision
 
 Every service runs exactly as in production (its own main.py / composition root and engine). The only
@@ -14,7 +14,7 @@ It costs real LLM calls and plays audio on this machine, so it only runs when as
 
     set E2E_REAL_LLM=1 and export the provider keys of ai-agent/config/step_models.json
     (e.g. GROQ_API_KEY/GROQ_URL, GOOGLE_API_KEY/GOOGLE_URL; never put them in a file this test reads)
-    brain_microservice/windows/Scripts/python.exe -m pytest contracts/tests/e2e/test_real_pipeline.py -q
+    <brain venv python> -m pytest contracts/tests/e2e/test_real_pipeline.py -q
 
 A real LLM is not deterministic: the movement assertions check the directives' fields, which is what
 the prompts ask for, so an occasional failure there is a finding about the prompt or the model.
@@ -32,6 +32,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from venv_paths import venv_python
 
 REPO = Path(__file__).resolve().parents[3]
 LAUNCHER = Path(__file__).with_name("real_services.py")
@@ -48,7 +49,7 @@ ALL_SERVICES = tuple(FOLDERS)
 
 
 def _venv_python(service: str) -> Path:
-    return REPO / FOLDERS[service] / "windows" / "Scripts" / "python.exe"
+    return venv_python(REPO / FOLDERS[service])
 
 
 pytestmark = pytest.mark.skipif(
@@ -155,7 +156,7 @@ class Stack:
 
 @pytest.fixture(scope="module")
 def speech(tmp_path_factory):
-    """phrase -> WAV synthesized by the real SAPI voice (the mocked input data), cached."""
+    """phrase -> WAV synthesized by the real speech voice (the mocked input data), cached."""
     directory = tmp_path_factory.mktemp("speech")
     cache: dict[str, Path] = {}
 

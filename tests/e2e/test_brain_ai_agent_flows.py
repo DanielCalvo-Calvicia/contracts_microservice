@@ -8,7 +8,7 @@ and on which flows ai-agent really ran.
 
 Run it with the Brain virtualenv from the workspace root:
 
-    brain_microservice/windows/Scripts/python.exe -m pytest contracts/tests/e2e/test_brain_ai_agent_flows.py -q
+    <brain venv python> -m pytest contracts/tests/e2e/test_brain_ai_agent_flows.py -q
 
 Skipped when ai-agent's virtualenv is missing. Set ``RUN_E2E=0`` to skip it explicitly.
 """
@@ -23,11 +23,12 @@ from pathlib import Path
 
 import httpx
 import pytest
+from venv_paths import venv_python
 
 REPO = Path(__file__).resolve().parents[3]
 FAKE_SERVICES = Path(__file__).with_name("fake_services.py")
 AI_AGENT_DIR = REPO / "ai-agent"
-AI_AGENT_PYTHON = AI_AGENT_DIR / "windows" / "Scripts" / "python.exe"
+AI_AGENT_PYTHON = venv_python(AI_AGENT_DIR)
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_E2E") == "0" or not AI_AGENT_PYTHON.exists(),

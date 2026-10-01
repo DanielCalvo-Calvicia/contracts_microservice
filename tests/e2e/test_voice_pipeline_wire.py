@@ -6,7 +6,7 @@ service's internals: the assertions are on what crossed the wire and what reache
 
 Run it with the Brain virtualenv (it needs httpx, pytest and Brain's own packages):
 
-    brain_microservice/windows/Scripts/python.exe -m pytest contracts/tests/e2e -q
+    <brain venv python> -m pytest contracts/tests/e2e -q
 
 It is skipped when a service virtualenv is missing. Set ``RUN_E2E=0`` to skip it explicitly.
 """
@@ -21,6 +21,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from venv_paths import venv_python
 
 REPO = Path(__file__).resolve().parents[3]
 FAKE_SERVICES = Path(__file__).with_name("fake_services.py")
@@ -28,7 +29,7 @@ SERVICES = ("microphone", "stt", "tts", "speaker")
 
 
 def _venv_python(service: str) -> Path:
-    return REPO / f"{service}_microservice" / "windows" / "Scripts" / "python.exe"
+    return venv_python(REPO / f"{service}_microservice")
 
 
 pytestmark = pytest.mark.skipif(
