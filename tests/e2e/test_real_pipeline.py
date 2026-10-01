@@ -1,6 +1,7 @@
 """The whole OBLIVION pipeline with REAL services and mocked INPUT DATA only.
 
-    speech WAV -> real microphone service -> real STT (whisper) -> Brain -> real ai-agent (real LLM)
+    speech WAV -> real microphone service -> real STT (whisper) -> Brain -> real ai-agent (real LLM):
+               motion-flow (which movements?) then conversation-flow (what to say)
                -> Brain -> real TTS (SAPI) -> real speaker (plays out loud)
                        \\-> real stepper service (its own mock-hardware mode) on a movement decision
 
@@ -15,7 +16,7 @@ It costs real LLM calls and plays audio on this machine, so it only runs when as
     (e.g. GROQ_API_KEY/GROQ_URL, GOOGLE_API_KEY/GOOGLE_URL; never put them in a file this test reads)
     brain_microservice/windows/Scripts/python.exe -m pytest contracts/tests/e2e/test_real_pipeline.py -q
 
-A real LLM is not deterministic: the movement assertions check the directive's fields, which is what
+A real LLM is not deterministic: the movement assertions check the directives' fields, which is what
 the prompts ask for, so an occasional failure there is a finding about the prompt or the model.
 """
 
@@ -221,6 +222,17 @@ class AIAgentTap(Tap):
         return reply
 
 
+class MotionTap(Tap):
+    def __init__(self, inner) -> None:
+        super().__init__(inner)
+        self.replies = []  # what motion-flow decided: the movements to run, in order
+
+    async def message(self, request):
+        reply = await self._inner.message(request)
+        self.replies.append(reply)
+        return reply
+
+
 class StepperTap(Tap):
     def __init__(self, inner) -> None:
         super().__init__(inner)
@@ -292,6 +304,7 @@ class SpeakerTap(Tap):
 class Brain:
     service: object
     ai_agent: AIAgentTap
+    motion: MotionTap
     stepper: StepperTap
     tts: TTSTap
     speaker: SpeakerTap
@@ -300,6 +313,7 @@ class Brain:
     async def close(self) -> None:
         for adapter in self.adapters:
             await adapter.close()
+        await self.motion._inner.close()
 
 
 def make_brain(ports: dict[str, int]) -> Brain:
@@ -308,6 +322,7 @@ def make_brain(ports: dict[str, int]) -> Brain:
         sys.path.insert(0, brain_dir)
     from application.services.service import BrainService
     from infrastructure.outbound.http.ai_agent.ai_agent_adapter import HttpAIAgentAdapter
+    from infrastructure.outbound.http.ai_agent.motion_agent_adapter import HttpMotionAgentAdapter
     from infrastructure.outbound.http.base import HttpServiceConfig
     from infrastructure.outbound.http.microphone.microphone_adapter import HttpMicrophoneAdapter
     from infrastructure.outbound.http.speaker.speaker_adapter import HttpSpeakerAdapter
@@ -330,11 +345,12 @@ def make_brain(ports: dict[str, int]) -> Brain:
     }
     tts, speaker = TTSTap(real["tts"]), SpeakerTap(real["speaker"])
     ai_agent, stepper = AIAgentTap(real["ai_agent"]), StepperTap(real["stepper"])
-    service = BrainService(real["microphone"], real["stt"], tts, speaker, ai_agent, stepper)
-    return Brain(service, ai_agent, stepper, tts, speaker, list(real.values()))
+    motion = MotionTap(HttpMotionAgentAdapter(config("ai_agent")))  # motion-flow: the same service, its own routes
+    service = BrainService(real["microphone"], real["stt"], tts, speaker, ai_agent, stepper, motion)
+    return Brain(service, ai_agent, motion, stepper, tts, speaker, list(real.values()))
 
 
-async def say_and_run(stack: Stack, brain: Brain, wav: Path, *, wait_for_move: bool = False):
+async def say_and_run(stack: Stack, brain: Brain, wav: Path, *, wait_for_move: bool = False, moves: int = 1):
     """Someone 'says' the phrase; one pipeline run (one decision), then the microphone is released."""
     from application.dtos.service_dtos import VoicePipelineServiceRequestDto
 
@@ -350,15 +366,15 @@ async def say_and_run(stack: Stack, brain: Brain, wav: Path, *, wait_for_move: b
         await brain.service.microphone_port.stop_stream()
     if wait_for_move:  # the movement is a fire-and-forget task that outlives the run
         deadline = time.monotonic() + 30
-        while not (brain.stepper.results or brain.stepper.errors) and time.monotonic() < deadline:
+        while len(brain.stepper.results) + len(brain.stepper.errors) < moves and time.monotonic() < deadline:
             await asyncio.sleep(0.1)
     return result
 
 
-def scenario(stack: Stack, speech, phrase: str, *, wait_for_move: bool = False, brain: Brain | None = None):
+def scenario(stack: Stack, speech, phrase: str, *, wait_for_move: bool = False, moves: int = 1, brain: Brain | None = None):
     brain = brain or make_brain(stack.ports)
     try:
-        result = run(say_and_run(stack, brain, speech(phrase), wait_for_move=wait_for_move))
+        result = run(say_and_run(stack, brain, speech(phrase), wait_for_move=wait_for_move, moves=moves))
     finally:
         pass
     return brain, result
@@ -377,7 +393,7 @@ def test_a_greeting_is_understood_answered_and_spoken_without_moving_anything(li
     assert result.success, result.message
     assert "hello" in _heard(brain)  # real whisper understood the synthesized speech
     (reply,) = brain.ai_agent.replies  # real LLM
-    assert reply.success and reply.response.strip() and reply.directive is None
+    assert reply.success and reply.response.strip() and not brain.motion.replies[0].directives
     assert brain.tts.spoken == [reply.response.strip()]  # what real TTS was told to say
     assert brain.speaker.pcm_bytes > 24000  # real audio reached the real speaker (>0.5 s at 24 kHz)
     assert brain.speaker.responses[0].success
@@ -391,8 +407,10 @@ def test_a_movement_request_moves_the_left_arm_on_the_real_stepper_service(live,
     assert result.success, result.message
     assert "left" in _heard(brain)
     (reply,) = brain.ai_agent.replies
-    assert reply.directive is not None, f"the LLM planned no movement: {reply.response!r}"
-    assert (reply.directive.arm, reply.directive.degrees, reply.directive.direction) == ("left", 90.0, "forward")
+    (motion,) = brain.motion.replies
+    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
+    (directive,) = motion.directives
+    assert (directive.arm, directive.degrees, directive.direction) == ("left", 90.0, "forward")
     assert brain.tts.spoken == [reply.response.strip()]
     assert brain.speaker.pcm_bytes > 24000
     (move,) = brain.stepper.results  # answered by the real stepper service (0.25 rev * 200 = 50 steps)
@@ -404,20 +422,36 @@ def test_a_backwards_request_for_the_right_arm_reaches_the_other_stepper(live, s
     brain, result = scenario(live, speech, "Turn your right arm forty five degrees backwards.", wait_for_move=True)
 
     assert result.success, result.message
-    (reply,) = brain.ai_agent.replies
-    assert reply.directive is not None, f"the LLM planned no movement: {reply.response!r}"
-    assert (reply.directive.arm, reply.directive.degrees, reply.directive.direction) == ("right", 45.0, "reverse")
+    (motion,) = brain.motion.replies
+    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
+    (directive,) = motion.directives
+    assert (directive.arm, directive.degrees, directive.direction) == ("right", 45.0, "reverse")
     (move,) = brain.stepper.results  # 45 degrees = 0.125 rev * 200 = 25 steps
     assert move.success and "25 steps" in move.message, move
     run(brain.close())
 
+
+def test_a_sequence_moves_the_arm_there_and_back_in_order_on_the_real_stepper_service(live, speech):
+    brain, result = scenario(
+        live, speech, "Rotate your left arm ninety degrees forward and then bring it back.", wait_for_move=True, moves=2)
+
+    assert result.success, result.message
+    (motion,) = brain.motion.replies
+    assert len(motion.directives) == 2, f"motion-flow planned {motion.directives!r}: {motion.response!r}"
+    first, second = motion.directives
+    assert (first.arm, first.degrees) == ("left", 90.0) and second.arm == "left"
+    # "there and back": the second movement undoes the first, as a negative number of degrees or as the other direction
+    other = "reverse" if first.direction == "forward" else "forward"
+    assert (second.degrees, second.direction) in ((-90.0, first.direction), (90.0, other))
+    assert [m.success for m in brain.stepper.results] == [True, True]  # both ran, in order, on the real stepper service
+    run(brain.close())
 
 def test_something_the_robot_cannot_do_is_refused_out_loud_and_nothing_moves(live, speech):
     brain, result = scenario(live, speech, "Please delete all the files on my computer.")
 
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
-    assert reply.success and reply.response.strip() and reply.directive is None
+    assert reply.success and reply.response.strip() and not brain.motion.replies[0].directives
     assert brain.tts.spoken == [reply.response.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert not brain.stepper.results and not brain.stepper.errors
@@ -468,7 +502,7 @@ def test_a_real_ai_agent_that_is_down_is_answered_with_the_fallback_apology(fres
     stack = fresh([s for s in ALL_SERVICES if s != "ai_agent"])
     brain, result = scenario(stack, speech, "Hello.")
 
-    from application.services.steps.stream_internal.step9_stt_to_tts import _AI_AGENT_UNREACHABLE_APOLOGY
+    from application.services.routes.stream_internal.stt_to_tts import _AI_AGENT_UNREACHABLE_APOLOGY
 
     assert result.success, result.message  # the pipeline survived
     assert brain.tts.spoken == [_AI_AGENT_UNREACHABLE_APOLOGY]
@@ -483,7 +517,8 @@ def test_a_real_stepper_that_is_down_does_not_change_what_is_said(fresh, speech)
 
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
-    assert reply.directive is not None, f"the LLM planned no movement: {reply.response!r}"
+    (motion,) = brain.motion.replies
+    assert motion.directives, f"motion-flow planned no movement: {motion.response!r}"
     assert brain.tts.spoken == [reply.response.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert brain.stepper.errors and not brain.stepper.results  # the move was attempted and failed alone

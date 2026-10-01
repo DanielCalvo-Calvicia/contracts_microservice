@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from contracts.api.microservices.ai_agent.decision import MotorDirective
+from contracts.api.microservices.ai_agent.decision import MotorDirective, RobotContext
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +37,8 @@ class AIAgentEndSessionResponse:
 class AIAgentMessageRequest:
     session_id: str
     message: str
+    # Sent to conversation-flow only: what motion-flow decided for this message (see RobotContext).
+    robot_context: Optional[RobotContext] = None
 
 
 @dataclass(slots=True, frozen=True)
