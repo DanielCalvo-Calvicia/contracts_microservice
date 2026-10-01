@@ -44,4 +44,4 @@ Expected: the module paths of `contracts/...` are listed. A wheel with only a `.
 
 ## Not used
 
-Publishing to PyPI or an internal index, and installing from `git+https://github.com/DanielCalvo-Calvicia/contracts.git@<tag>` (the remote of this repo is `https://github.com/DanielCalvo-Calvicia/contracts.git`), are possible in principle but are not the workflow here and were not tried.
+Publishing to PyPI or an internal index, and installing from `git+https://github.com/DanielCalvo-Calvicia/contracts_microservice.git@<tag>` (the remote of this repo is `https://github.com/DanielCalvo-Calvicia/contracts_microservice.git`), are possible in principle but are not the workflow here and were not tried.
