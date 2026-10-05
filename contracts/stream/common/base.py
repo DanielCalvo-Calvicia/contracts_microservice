@@ -41,6 +41,7 @@ class EventType(StrEnum):
     HEARTBEAT = "heartbeat"
     START_STREAM = "stream_started"
     PARTIAL = "partial"
+    UTTERANCE = "utterance"
     COMPLETED = "completed"
     INPUT_COMPLETED = "input_completed"
     ERROR = "error"

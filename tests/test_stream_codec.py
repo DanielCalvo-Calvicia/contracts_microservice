@@ -25,9 +25,9 @@ from contracts.stream.microservices.microphone.outbound.completed import (
     MicrophoneCompletedOutboundEvent,
     MicrophoneCompletedOutboundEventDTO,
 )
-from contracts.stream.microservices.microphone.outbound.partial import (
-    MicrophonePartialEvent,
-    MicrophonePartialEventDTO,
+from contracts.stream.microservices.microphone.outbound.utterance import (
+    MicrophoneUtteranceEvent,
+    MicrophoneUtteranceEventDTO,
 )
 from contracts.stream.microservices.tts.outbound.partial import PartialOutboundEvent, PartialOutboundEventDTO
 
@@ -39,7 +39,7 @@ def _mic_events():
             MicrophoneStreamStartedEvent,
             MicrophoneStreamStartedEventDTO(message="started", sample_rate=16000, channels=1),
         ),
-        sequencer.next(MicrophonePartialEvent, MicrophonePartialEventDTO(bytes_base64="AAE=")),
+        sequencer.next(MicrophoneUtteranceEvent, MicrophoneUtteranceEventDTO(bytes_base64="AAE=", sample_rate=16000)),
         sequencer.next(HeartbeatEvent),
         sequencer.next(
             MicrophoneCompletedOutboundEvent,
@@ -64,7 +64,7 @@ def test_ndjson_round_trip_preserves_types_payloads_and_order() -> None:
     decoded = [d for i in range(0, len(body), 7) for d in decoder.feed(body[i : i + 7])]
     assert [d.type for d in decoded] == [e.type for e in events]
     assert [d.sequence for d in decoded] == [1, 2, 3, 4]
-    assert decoded[1].payload == MicrophonePartialEventDTO(bytes_base64="AAE=")
+    assert decoded[1].payload == MicrophoneUtteranceEventDTO(bytes_base64="AAE=", sample_rate=16000)
     assert decoded[0].payload.sample_rate == 16000
     assert decoded[2].payload is None  # heartbeat carries no data
 
@@ -129,8 +129,8 @@ def test_event_not_in_the_stream_schema_is_rejected() -> None:
 
 def test_extra_payload_fields_are_tolerated() -> None:
     line = (
-        b'{"type":"partial","sequence":1,"timestamp":"2026-01-01T00:00:00Z",'
-        b'"payload":{"bytes_base64":"AA==","future_field":1}}'
+        b'{"type":"utterance","sequence":1,"timestamp":"2026-01-01T00:00:00Z",'
+        b'"payload":{"bytes_base64":"AA==","sample_rate":16000,"future_field":1}}'
     )
     assert decode_event(line, schemas.MICROPHONE_OUTBOUND).payload.bytes_base64 == "AA=="
 

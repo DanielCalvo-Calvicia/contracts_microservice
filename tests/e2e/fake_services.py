@@ -41,8 +41,15 @@ def build_microphone() -> FastAPI:
     from infrastructure.inbound.http.http_handler import MicrophoneHandler
 
     class SineStream(AudioStreamPort):
+        """A sound card with someone speaking: a moment of room noise, 80 chunks of a loud tone, then silence.
+
+        The microphone cuts the stream into utterances, so what the pipeline gets is that one tone as one utterance.
+        """
+
+        QUIET_CHUNKS, TONE_CHUNKS = 5, 80
+
         def __init__(self, chunk_size: int) -> None:
-            self._chunk_size, self._n, self._closed = chunk_size, 0, False
+            self._chunk_size, self._n, self._closed, self._chunks = chunk_size, 0, False, 0
 
         @property
         def sample_rate(self) -> int:
@@ -56,8 +63,15 @@ def build_microphone() -> FastAPI:
                 raise StopAsyncIteration
             await asyncio.sleep(0.01)
             record_trace("microphone")
+            self._chunks += 1
+            if self._chunks <= self.QUIET_CHUNKS:
+                amplitude = 20  # room noise: the microphone learns its noise floor from it
+            elif self._chunks <= self.QUIET_CHUNKS + self.TONE_CHUNKS:
+                amplitude = 8000
+            else:
+                amplitude = 0
             samples = [
-                int(8000 * math.sin(2 * math.pi * 300 * (self._n + i) / CAPTURE_RATE))
+                int(amplitude * math.sin(2 * math.pi * 300 * (self._n + i) / CAPTURE_RATE))
                 for i in range(self._chunk_size)
             ]
             self._n += self._chunk_size
@@ -84,19 +98,9 @@ def build_stt() -> FastAPI:
     from infrastructure.inbound.http.http_handler import SttHandler
 
     class Engine(TranscriptionPort):
-        async def transcribe_stream(self, settings, audio_stream):
-            async def texts():
-                chunks = 0
-                async for chunk in audio_stream:
-                    chunks += len(chunk) > 0
-                    record_trace("stt")
-                    if chunks == 8:  # the microphone's audio reached the engine
-                        yield "hello wire"
-
-            return texts()
-
         async def transcribe_batch(self, audio_data: bytes, sample_rate: int) -> str:
-            return ""
+            record_trace("stt")
+            return "hello wire" if audio_data else ""  # an utterance, cut by the microphone, reached the engine
 
         def is_available(self) -> bool:
             return True

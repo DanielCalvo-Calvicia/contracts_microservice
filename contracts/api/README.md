@@ -67,7 +67,7 @@ Used by Brain and ai-agent. `AIAgentMessageRequest.robot_context` and `RobotCont
 ## `microservices/stt/`
 
 `process_batch.py`: `STTProcessBatchRequest(audio_data, sample_rate=16000, language, model)`, `STTProcessBatchResponse(text, confidence)` (used by Brain and STT).
-`process_stream.py`: `STTStreamConfig(sample_rate=16000, channels=1, chunk_size=1024, language, model, silence_threshold=150, silence_limit_seconds=2.0)`, `STTProcessStreamSessionRequest/Response`.
+`process_stream.py`: `STTStreamConfig(sample_rate=16000, channels=1, language, model)` (STT does not cut utterances any more: the microphone does, see the stream README), `STTProcessStreamSessionRequest/Response`.
 `set_stream.py`: `STTSetStreamRequest/Response`. `get_stream.py`: `STTGetStreamRequest/Response`. The stream and session ones are not used by a service.
 
 ## `microservices/tts/`

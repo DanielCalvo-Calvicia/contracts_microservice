@@ -29,8 +29,14 @@ SERVICE_FOLDERS = (
 
 
 def build_wheel(into: Path) -> Path:
+    # Built from a clean copy of the source: a leftover build/ folder would put modules that were deleted since
+    # (or any file that is not in the tree) into the wheel.
+    source = into / "source"
+    shutil.copytree(
+        CONTRACTS, source, ignore=shutil.ignore_patterns("build", "dist", "*.egg-info", "__pycache__", ".venv")
+    )
     subprocess.run(
-        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(into), str(CONTRACTS)],
+        [sys.executable, "-m", "pip", "wheel", "--no-deps", "--wheel-dir", str(into), str(source)],
         check=True,
     )
     (wheel,) = into.glob("contracts_microservice-*.whl")

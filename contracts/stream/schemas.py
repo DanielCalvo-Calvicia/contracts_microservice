@@ -11,6 +11,10 @@ Audio on every ``bytes_base64`` field is raw little-endian PCM16, mono unless th
 ``stream_started`` event says otherwise. No service converts audio for another: TTS produces the
 format Brain asks for, the microphone reports the rate it captures at, and Brain passes those
 numbers on unchanged.
+
+The microphone cuts what it hears into utterances (silence detection lives there) and sends one
+``utterance`` event per finished utterance with its whole audio; Brain hands each to STT as an
+``utterance`` event, and STT only transcribes it.
 """
 
 from __future__ import annotations
@@ -21,9 +25,9 @@ from contracts.stream.microservices.microphone.outbound.completed import (
     MicrophoneCompletedOutboundEvent,
     MicrophoneCompletedOutboundEventDTO,
 )
-from contracts.stream.microservices.microphone.outbound.partial import (
-    MicrophonePartialEvent,
-    MicrophonePartialEventDTO,
+from contracts.stream.microservices.microphone.outbound.utterance import (
+    MicrophoneUtteranceEvent,
+    MicrophoneUtteranceEventDTO,
 )
 from contracts.stream.microservices.microphone.outbound.stream_started import (
     MicrophoneStreamStartedEvent,
@@ -81,9 +85,9 @@ from contracts.stream.microservices.stt.inbound.stream_started import (
     STTStreamStartedInboundEvent,
     STTStreamStartedInboundEventDTO,
 )
-from contracts.stream.microservices.stt.inbound.partial import (
-    STTPartialInboundEvent,
-    STTPartialInboundEventDTO,
+from contracts.stream.microservices.stt.inbound.utterance import (
+    STTUtteranceInboundEvent,
+    STTUtteranceInboundEventDTO,
 )
 from contracts.stream.microservices.stt.outbound.completed import (
     STTCompletedOutboundEvent,
@@ -124,7 +128,7 @@ MICROPHONE_OUTBOUND = StreamSchema(
     "microphone.outbound",
     {
         EventType.START_STREAM: (MicrophoneStreamStartedEvent, MicrophoneStreamStartedEventDTO),
-        EventType.PARTIAL: (MicrophonePartialEvent, MicrophonePartialEventDTO),
+        EventType.UTTERANCE: (MicrophoneUtteranceEvent, MicrophoneUtteranceEventDTO),
         EventType.COMPLETED: (MicrophoneCompletedOutboundEvent, MicrophoneCompletedOutboundEventDTO),
     },
 )
@@ -133,7 +137,7 @@ STT_INBOUND = StreamSchema(
     "stt.inbound",
     {
         EventType.START_STREAM: (STTStreamStartedInboundEvent, STTStreamStartedInboundEventDTO),
-        EventType.PARTIAL: (STTPartialInboundEvent, STTPartialInboundEventDTO),
+        EventType.UTTERANCE: (STTUtteranceInboundEvent, STTUtteranceInboundEventDTO),
         EventType.COMPLETED: (STTCompletedInboundEvent, STTCompletedInboundEventDTO),
     },
 )

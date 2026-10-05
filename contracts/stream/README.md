@@ -30,7 +30,7 @@ header of Brain's request covers the whole life of the stream (no trace id lives
 
 | field       | rule |
 |-------------|------|
-| `type`      | `stream_started` \| `partial` \| `completed` \| `input_completed` \| `heartbeat` \| `error` |
+| `type`      | `stream_started` \| `partial` \| `utterance` \| `completed` \| `input_completed` \| `heartbeat` \| `error` |
 | `sequence`  | 1, 2, 3, … per stream and direction, no gaps |
 | `timestamp` | UTC ISO-8601 with microseconds and a trailing `Z` |
 | `payload`   | always a JSON object (`{}` for `stream_started`/`heartbeat` without data) |
@@ -42,7 +42,7 @@ other stream is NDJSON.
 ## Lifecycle
 
 ```text
-stream_started -> (partial | heartbeat)* -> completed ... -> end of body
+stream_started -> (partial | utterance | heartbeat)* -> completed ... -> end of body
                                   \-> error (recoverable=true: keep reading; false: the stream is over)
 ```
 
@@ -63,7 +63,7 @@ converted in between:
 
 | stream | format |
 |--------|--------|
-| Microphone → Brain → STT | mono, the rate announced in the microphone's `stream_started` (default 16 kHz) |
+| Microphone → Brain → STT | mono, one `utterance` event per finished utterance (the microphone does the silence cutting) at the rate in that event (the microphone's rate, or the one it was asked to resample to; default 16 kHz) |
 | TTS → Brain → Speaker    | mono, the rate Brain asked TTS for (default 24 kHz); TTS converts from its engine's rate |
 | Speaker device           | the speaker resamples only if its device rejects that rate, and logs that it did |
 
