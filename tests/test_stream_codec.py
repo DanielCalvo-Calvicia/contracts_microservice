@@ -260,3 +260,24 @@ def test_stepper_streams_carry_commands_in_and_results_out() -> None:
     events = list(NdjsonDecoder(schemas.STEPPER_OUTBOUND).feed(answer))
     assert [e.type for e in events] == [EventType.START_STREAM, EventType.PARTIAL, EventType.COMPLETED]
     assert events[1].payload.success is True
+
+
+def test_stt_completed_event_carries_the_utterance_audio_and_old_events_without_it_still_decode() -> None:
+    from contracts.stream.microservices.stt.outbound.completed import (
+        STTCompletedOutboundEvent,
+        STTCompletedOutboundEventDTO,
+    )
+
+    with_audio = EventSequencer().next(
+        STTCompletedOutboundEvent,
+        STTCompletedOutboundEventDTO(reason="completed", output="oblivion three oh six", audio_base64="AAEC"),
+    )
+    decoded = decode_event(encode_ndjson(with_audio), schemas.STT_OUTBOUND)
+    assert decoded.payload.output == "oblivion three oh six" and decoded.payload.audio_base64 == "AAEC"
+
+    old = (
+        b'{"type":"completed","sequence":1,"timestamp":"2026-01-01T00:00:00Z",'
+        b'"payload":{"reason":"completed","output":"hello"}}'
+    )
+    decoded_old = decode_event(old, schemas.STT_OUTBOUND)
+    assert decoded_old.payload.output == "hello" and decoded_old.payload.audio_base64 == ""

@@ -10,6 +10,10 @@ from contracts.stream.common.base import BaseEvent, EventType
 class STTCompletedOutboundEventDTO:
     reason: str
     output: str
+    # The utterance this text is the transcription of, as PCM16 mono at the sample rate of the input stream, base64.
+    # Empty unless the STT stream was asked to return it (the wake-phrase gate: Brain forwards the audio of an
+    # utterance that carried the phrase to the real engine).
+    audio_base64: str = ""
 
 @dataclass(slots=True, frozen=True)
 class STTCompletedOutboundEvent(BaseEvent[STTCompletedOutboundEventDTO]):
@@ -17,4 +21,3 @@ class STTCompletedOutboundEvent(BaseEvent[STTCompletedOutboundEventDTO]):
         default=EventType.COMPLETED,
         init=False,
     )
-
