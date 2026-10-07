@@ -1,10 +1,11 @@
-"""Brain <-> ai-agent over real HTTP: does Brain understand ai-agent's flows (conversation-flow, motion-flow)?
+"""Brain <-> ai-agent over real HTTP: Brain makes ONE call per utterance and ai-agent identifies the message and
+answers it with one flow (conversation, special or movement).
 
-A real ai-agent process (its own virtualenv and REAL composition root: flows, routes, sessions, tracing; only
+A real ai-agent process (its own virtualenv and REAL composition root: router, flows, routes, sessions, tracing; only
 the LLM is replaced by a keyword script, see ``fake_services.build_ai_agent``) is driven by Brain's real
 composition root: its real config defaults, real adapters and real ``BrainService.decide``. Only the stepper is
 a recorder (its wire is covered by Brain's own tests). The assertions are on what Brain decides to say and move,
-and on which flows ai-agent really ran.
+and on which phases ai-agent really ran.
 
 Run it with the Brain virtualenv from the workspace root:
 
@@ -35,9 +36,11 @@ pytestmark = pytest.mark.skipif(
     reason="needs ai-agent's virtualenv",
 )
 
+TRIAGE = "triage_specialist_phase1_response_format"
 PLANNER = "motion_planner_phase20_response_format"
 PROJECT_MANAGER = "project_manager_phase2_response_format"
 DRAFT = "draft_writer_phase7_response_format"
+EDITOR = "editor_in_chief_phase8_response_format"
 
 
 def _free_port() -> int:
@@ -148,24 +151,34 @@ def directive(arm: str, degrees: float, direction: str):
 
 
 # ------------------------------------------------------------------ the flows, as Brain sees them
-# Brain asks them one after the other, in order: conversation-flow writes the reply (what the user hears),
-# motion-flow, only when conversation-flow has ended, decides the movements.
+# Brain makes one call per utterance. ai-agent identifies the message (triage) and the domain picks the flow:
+# communication -> conversation, movement -> movement, anything else -> special.
 
 
-def test_a_plain_message_runs_conversation_flow_then_motion_flow_and_moves_nothing(agent):
+def test_a_plain_message_is_answered_by_the_conversation_flow_and_moves_nothing(agent):
     async def scenario(service, stepper):
         return await service.decide("hello there")
 
     decision = with_brain(agent, scenario)
 
-    assert decision.spoken == ("PLAIN",)                  # conversation-flow answered; motion-flow had nothing to say
-    assert decision.directives == () and decision.failed_flows == ()
+    assert decision.spoken == ("PLAIN",)
+    assert decision.directives == () and decision.failed_flows == () and decision.awaiting_user_input is False
+    assert agent.formats() == [TRIAGE, DRAFT, EDITOR]       # identified, written, polished: nothing planned or moved
+
+
+def test_a_task_is_answered_by_the_special_flow_after_planning(agent):
+    async def scenario(service, stepper):
+        return await service.decide("make a table of my family")
+
+    decision = with_brain(agent, scenario)
+
+    assert decision.spoken == ("PLANNED",) and decision.directives == ()
     formats = agent.formats()
-    assert DRAFT in formats and PLANNER in formats
-    assert formats.index(DRAFT) < formats.index(PLANNER)  # motion-flow was asked only after conversation-flow ended
+    assert formats[0] == TRIAGE and PROJECT_MANAGER in formats and formats[-2:] == [DRAFT, EDITOR]
+    assert PLANNER not in formats
 
 
-def test_a_movement_sequence_is_understood_ordered_and_run_after_the_reply(agent):
+def test_a_movement_sequence_is_understood_ordered_announced_and_run(agent):
     async def scenario(service, stepper):
         decision = await service.decide("raise your left arm there and back")
         await service.move_arms(decision.directives)
@@ -176,11 +189,22 @@ def test_a_movement_sequence_is_understood_ordered_and_run_after_the_reply(agent
     expected = (directive("left", 90.0, "forward"), directive("left", -90.0, "forward"))
     assert decision.directives == expected                # the list, in order, signed degrees intact
     assert tuple(moves) == expected                       # and Brain would send them to the stepper in that order
-    assert decision.spoken == ("PLAIN",)                  # the reply is conversation-flow's; motion-flow added no words
-    assert PROJECT_MANAGER not in agent.formats()         # nothing was planned: the fast path answered
+    assert decision.spoken == ("Moving my left arm.",)    # the movement flow announces what it is about to do
+    assert agent.formats() == [TRIAGE, PLANNER]           # no writer, no plan: only the movement flow ran
 
 
-def test_a_missing_detail_is_asked_after_the_reply_and_the_answer_goes_only_to_motion_flow(agent):
+def test_a_movement_is_silent_when_brain_is_told_not_to_speak_it(agent, monkeypatch):
+    monkeypatch.setenv("AI_AGENT_SPEAK_MOVEMENTS", "0")
+
+    async def scenario(service, stepper):
+        return await service.decide("raise your left arm there and back")
+
+    decision = with_brain(agent, scenario)
+
+    assert len(decision.directives) == 2 and decision.spoken == ()    # moves, says nothing
+
+
+def test_a_missing_detail_is_asked_and_the_answer_goes_straight_to_the_movement_flow(agent):
     async def scenario(service, stepper):
         asked = await service.decide("move my arm")
         before_the_answer = len(agent.formats())
@@ -189,15 +213,17 @@ def test_a_missing_detail_is_asked_after_the_reply_and_the_answer_goes_only_to_m
 
     asked, calls_for_the_answer, answered = with_brain(agent, scenario)
 
-    assert asked.spoken == ("PLAIN", "Which arm, and how many degrees?")   # the reply, then motion-flow's question
-    assert asked.directives == ()
-    assert DRAFT not in calls_for_the_answer                      # the answer was NOT sent to conversation-flow ...
-    assert PLANNER in calls_for_the_answer                        # ... only to motion-flow's paused run
+    assert asked.spoken == ("Which arm, and how many degrees?",) and asked.directives == ()
+    assert asked.awaiting_user_input is True              # Brain speaks the question and does not move
+    assert TRIAGE not in calls_for_the_answer and DRAFT not in calls_for_the_answer   # not identified again
+    assert PLANNER in calls_for_the_answer                # ai-agent resumed the movement flow that asked
     assert answered.directives == (directive("left", 30.0, "forward"),)
-    assert answered.spoken == ()
+    assert answered.awaiting_user_input is False
 
 
-def test_a_refused_movement_is_said_after_the_reply_and_nothing_moves(agent):
+def test_a_refused_movement_is_said_and_nothing_moves(agent, monkeypatch):
+    monkeypatch.setenv("AI_AGENT_SPEAK_MOVEMENTS", "0")    # a refusal is said even when movements are silent
+
     async def scenario(service, stepper):
         decision = await service.decide("turn your arm too far")
         await service.move_arms(decision.directives)
@@ -206,23 +232,23 @@ def test_a_refused_movement_is_said_after_the_reply_and_nothing_moves(agent):
     decision, moves = with_brain(agent, scenario)
 
     assert decision.directives == () and moves == []
-    assert decision.spoken[0] == "PLAIN"
-    assert decision.spoken[1] == "I cannot turn an arm more than 360 degrees in one movement."
+    assert decision.spoken == ("I cannot turn an arm more than 360 degrees in one movement.",)
 
 
-def test_each_flow_keeps_its_own_session_across_messages(agent):
+def test_brain_keeps_one_session_with_ai_agent_across_messages(agent):
     async def scenario(service, stepper):
         await service.decide("hello")
         first = [flow.session_id for flow in service.agent_flows]
         await service.decide("hello again")
-        return first, [flow.session_id for flow in service.agent_flows]
+        return [flow.name for flow in service.agent_flows], first, [flow.session_id for flow in service.agent_flows]
 
-    first, second = with_brain(agent, scenario)
+    names, first, second = with_brain(agent, scenario)
 
-    assert first == second and all(first) and first[0] != first[1]    # one session per flow, reused
+    assert names == ["ai-agent"]
+    assert first == second and all(first)                 # one session, reused
 
 
-def test_brain_reconnects_every_flow_when_ai_agent_restarts_and_forgets_its_sessions(agent):
+def test_brain_reconnects_when_ai_agent_restarts_and_forgets_its_session(agent):
     async def scenario(service, stepper):
         await service.decide("hello")
         before = [flow.session_id for flow in service.agent_flows]
@@ -232,43 +258,33 @@ def test_brain_reconnects_every_flow_when_ai_agent_restarts_and_forgets_its_sess
 
     before, after, decision = with_brain(agent, scenario)
 
-    assert all(new not in (None, old) for new, old in zip(after, before))             # a new session in each flow
-    assert len(decision.directives) == 2 and decision.spoken == ("PLAIN",)            # and the answer is the real one
+    assert all(new not in (None, old) for new, old in zip(after, before))             # a new session
+    assert len(decision.directives) == 2 and decision.spoken == ("Moving my left arm.",)   # and the answer is the real one
 
-
-def test_brain_follows_the_flows_it_is_configured_with(agent, monkeypatch):
-    monkeypatch.setenv("AI_AGENT_FLOWS", "motion-flow")        # a Brain that only decides movements
-
-    async def scenario(service, stepper):
-        return [flow.name for flow in service.agent_flows], await service.decide("raise your left arm there and back")
-
-    names, decision = with_brain(agent, scenario)
-
-    assert names == ["motion-flow"]
-    assert len(decision.directives) == 2 and decision.spoken == ()
-    assert DRAFT not in agent.formats()                        # conversation-flow was never asked
 
 # ------------------------------------------------------------------ the service itself
 
 
-def test_the_original_session_routes_still_answer_as_conversation_flow(agent):
+def test_the_session_routes_say_which_flow_answered(agent):
     base = agent.base_url
-    started = httpx.post(f"{base}/session/start", json={"user_id": "tester", "username": "t"}).json()
-    session = started["data"]["session_id"]
-    reply = httpx.post(f"{base}/session/message", json={"user_id": "tester", "session_id": session, "message": "hello"})
-    # the deprecated alias shares conversation-flow's sessions
-    again = httpx.post(f"{base}/conversation-flow/session/message",
-                       json={"user_id": "tester", "session_id": session, "message": "hello"})
+    session = httpx.post(f"{base}/session/start", json={"user_id": "tester", "username": "t"}).json()["data"]["session_id"]
 
-    assert reply.json()["data"]["success"] and again.json()["data"]["success"]
-    assert "directive" not in reply.json()["data"] or reply.json()["data"]["directive"] is None
-    unknown = httpx.post(f"{base}/motion-flow/session/message",
-                         json={"user_id": "tester", "session_id": session, "message": "hello"}).json()
-    assert unknown["data"]["error_code"] == "SESSION_NOT_FOUND"      # a conversation session is not a motion session
+    def say(text):
+        return httpx.post(f"{base}/session/message", json={"user_id": "tester", "session_id": session, "message": text},
+                          timeout=30).json()["data"]
+
+    assert say("hello")["flow"] == "conversation"
+    assert say("make a table of my family")["flow"] == "special"
+    moved = say("raise your left arm there and back")
+    assert moved["flow"] == "movement" and len(moved["directives"]) == 2
+    silent = httpx.post(f"{base}/session/message", json={
+        "user_id": "tester", "session_id": session, "message": "raise your left arm there and back",
+        "speak_movements": False}, timeout=30).json()["data"]
+    assert silent["response"] == "" and len(silent["directives"]) == 2
 
 
-def test_ai_agent_advertises_the_routes_of_both_flows(agent):
+def test_ai_agent_has_one_set_of_session_routes_and_no_routes_per_flow(agent):
     paths = httpx.get(f"{agent.base_url}/openapi.json", timeout=10).json()["paths"]
-    for flow in ("conversation-flow", "motion-flow"):
-        for route in ("start", "message", "end"):
-            assert f"/{flow}/session/{route}" in paths
+    for route in ("start", "message", "end"):
+        assert f"/session/{route}" in paths
+    assert not [path for path in paths if "conversation-flow" in path or "motion-flow" in path]

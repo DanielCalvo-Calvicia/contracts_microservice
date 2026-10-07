@@ -1,7 +1,7 @@
 """The whole OBLIVION pipeline with REAL services and mocked INPUT DATA only.
 
     speech WAV -> real microphone service -> real STT (whisper) -> Brain -> real ai-agent (real LLM):
-               motion-flow (which movements?) then conversation-flow (what to say)
+               identification, then ONE flow answers: conversation (what to say), special (a task) or movement
                -> Brain -> real TTS -> real speaker (plays out loud)
                        \\-> real stepper service (its own mock-hardware mode) on a movement decision
 
@@ -214,21 +214,10 @@ class AIAgentTap(Tap):
     def __init__(self, inner) -> None:
         super().__init__(inner)
         self.transcripts: list[str] = []  # what real STT heard: the text sent to ai-agent
-        self.replies = []  # what the real LLM decided
+        self.replies = []  # what ai-agent decided (reply, movements, which flow answered)
 
     async def message(self, request):
         self.transcripts.append(request.message)
-        reply = await self._inner.message(request)
-        self.replies.append(reply)
-        return reply
-
-
-class MotionTap(Tap):
-    def __init__(self, inner) -> None:
-        super().__init__(inner)
-        self.replies = []  # what motion-flow decided: the movements to run, in order
-
-    async def message(self, request):
         reply = await self._inner.message(request)
         self.replies.append(reply)
         return reply
@@ -305,7 +294,6 @@ class SpeakerTap(Tap):
 class Brain:
     service: object
     ai_agent: AIAgentTap
-    motion: MotionTap
     stepper: StepperTap
     tts: TTSTap
     speaker: SpeakerTap
@@ -314,7 +302,6 @@ class Brain:
     async def close(self) -> None:
         for adapter in self.adapters:
             await adapter.close()
-        await self.motion._inner.close()
 
 
 def make_brain(ports: dict[str, int]) -> Brain:
@@ -322,8 +309,7 @@ def make_brain(ports: dict[str, int]) -> Brain:
     if brain_dir not in sys.path:
         sys.path.insert(0, brain_dir)
     from application.services.brain_service import BrainService
-    from infrastructure.outbound.http.ai_agent.conversation_flow_adapter import HttpConversationFlowAdapter
-    from infrastructure.outbound.http.ai_agent.motion_flow_adapter import HttpMotionFlowAdapter
+    from infrastructure.outbound.http.ai_agent.ai_agent_adapter import HttpAIAgentAdapter
     from infrastructure.outbound.http.http_client import HttpServiceConfig
     from infrastructure.outbound.http.microphone.microphone_adapter import HttpMicrophoneAdapter
     from infrastructure.outbound.http.speaker.speaker_adapter import HttpSpeakerAdapter
@@ -339,17 +325,17 @@ def make_brain(ports: dict[str, int]) -> Brain:
         "stt": HttpSTTAdapter(config("stt")),
         "tts": HttpTTSAdapter(config("tts")),
         "speaker": HttpSpeakerAdapter(config("speaker")),
-        "ai_agent": HttpConversationFlowAdapter(config("ai_agent")),
+        "ai_agent": HttpAIAgentAdapter(config("ai_agent")),
         "stepper": HttpStepperAdapter(
             config("stepper"), left_arm_stepper_id="stepper_1", right_arm_stepper_id="stepper_2", default_rpm=15.0
         ),
     }
     tts, speaker = TTSTap(real["tts"]), SpeakerTap(real["speaker"])
     ai_agent, stepper = AIAgentTap(real["ai_agent"]), StepperTap(real["stepper"])
-    motion = MotionTap(HttpMotionFlowAdapter(config("ai_agent")))  # motion-flow: the same service, its own routes
-    # conversation-flow first, motion-flow only when it has ended; Brain says "message received" / "thinking" meanwhile
-    service = BrainService(real["microphone"], real["stt"], tts, speaker, stepper, (ai_agent, motion))
-    return Brain(service, ai_agent, motion, stepper, tts, speaker, list(real.values()))
+    # one call per utterance: ai-agent identifies it and one of its flows answers; Brain says "message received" /
+    # "thinking" meanwhile
+    service = BrainService(real["microphone"], real["stt"], tts, speaker, stepper, (ai_agent,))
+    return Brain(service, ai_agent, stepper, tts, speaker, list(real.values()))
 
 
 async def say_and_run(stack: Stack, brain: Brain, wav: Path, *, wait_for_move: bool = False, moves: int = 1):
@@ -403,7 +389,7 @@ def test_a_greeting_is_understood_answered_and_spoken_without_moving_anything(li
     assert result.success, result.message
     assert "hello" in _heard(brain)  # real whisper understood the synthesized speech
     (reply,) = brain.ai_agent.replies  # real LLM
-    assert reply.success and reply.spoken.strip() and not brain.motion.replies[0].directives
+    assert reply.success and reply.spoken.strip() and not reply.directives
     assert brain.tts.spoken[0] == "Message received."  # the user hears at once that the message arrived ...
     assert _answers(brain) == [reply.spoken.strip()]  # ... and then what real TTS was told to say
     assert brain.speaker.pcm_bytes > 24000  # real audio reached the real speaker (>0.5 s at 24 kHz)
@@ -418,9 +404,8 @@ def test_a_movement_request_moves_the_left_arm_on_the_real_stepper_service(live,
     assert result.success, result.message
     assert "left" in _heard(brain)
     (reply,) = brain.ai_agent.replies
-    (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
-    (directive,) = motion.directives
+    assert reply.directives, f"ai-agent planned no movement: {reply.spoken!r}"
+    (directive,) = reply.directives
     assert (directive.arm, directive.degrees, directive.direction) == ("left", 90.0, "forward")
     assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
@@ -433,9 +418,9 @@ def test_a_backwards_request_for_the_right_arm_reaches_the_other_stepper(live, s
     brain, result = scenario(live, speech, "Turn your right arm forty five degrees backwards.", wait_for_move=True)
 
     assert result.success, result.message
-    (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
-    (directive,) = motion.directives
+    (reply,) = brain.ai_agent.replies
+    assert reply.directives, f"ai-agent planned no movement: {reply.spoken!r}"
+    (directive,) = reply.directives
     assert (directive.arm, directive.degrees, directive.direction) == ("right", 45.0, "reverse")
     (move,) = brain.stepper.results  # 45 degrees = 0.125 rev * 200 = 25 steps
     assert move.success and "25 steps" in move.message, move
@@ -447,9 +432,9 @@ def test_a_sequence_moves_the_arm_there_and_back_in_order_on_the_real_stepper_se
         live, speech, "Rotate your left arm ninety degrees forward and then bring it back.", wait_for_move=True, moves=2)
 
     assert result.success, result.message
-    (motion,) = brain.motion.replies
-    assert len(motion.directives) == 2, f"motion-flow planned {motion.directives!r}: {motion.spoken!r}"
-    first, second = motion.directives
+    (reply,) = brain.ai_agent.replies
+    assert len(reply.directives) == 2, f"ai-agent planned {reply.directives!r}: {reply.spoken!r}"
+    first, second = reply.directives
     assert (first.arm, first.degrees) == ("left", 90.0) and second.arm == "left"
     # "there and back": the second movement undoes the first, as a negative number of degrees or as the other direction
     other = "reverse" if first.direction == "forward" else "forward"
@@ -462,7 +447,7 @@ def test_something_the_robot_cannot_do_is_refused_out_loud_and_nothing_moves(liv
 
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
-    assert reply.success and reply.spoken.strip() and not brain.motion.replies[0].directives
+    assert reply.success and reply.spoken.strip() and not reply.directives
     assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert not brain.stepper.results and not brain.stepper.errors
@@ -528,8 +513,7 @@ def test_a_real_stepper_that_is_down_does_not_change_what_is_said(fresh, speech)
 
     assert result.success, result.message
     (reply,) = brain.ai_agent.replies
-    (motion,) = brain.motion.replies
-    assert motion.directives, f"motion-flow planned no movement: {motion.spoken!r}"
+    assert reply.directives, f"ai-agent planned no movement: {reply.spoken!r}"
     assert _answers(brain) == [reply.spoken.strip()]
     assert brain.speaker.pcm_bytes > 24000
     assert brain.stepper.errors and not brain.stepper.results  # the move was attempted and failed alone

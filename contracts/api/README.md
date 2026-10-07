@@ -39,15 +39,14 @@ Every non-stream endpoint answers with `ApiEnvelope` (`contracts/api/common/enve
 | `get_stream.py` | `GetStreamRequest(session_id)` | `GetStreamResponse(stream)` | nobody |
 | `set_stream.py` | `SetStreamRequest(session_id, stream)` | `SetStreamResponse(success, message)` | nobody |
 
-## `microservices/ai_agent/` (since 0.7.0; motion flow since 0.9.0)
+## `microservices/ai_agent/` (since 0.7.0; one message route for every flow since 0.13.0)
 
 | module | classes |
 |---|---|
-| `session.py` | `AIAgentStartSessionRequest(username, email, session_name)`, `AIAgentStartSessionResponse(success, session_id, message, error_code)`, `AIAgentEndSessionRequest(session_id)`, `AIAgentEndSessionResponse(success, message, error_code)`, `AIAgentMessageRequest(session_id, message, robot_context)`, `AIAgentMessageResponse(success, response, directive, message, error_code)` |
-| `motion.py` | `AIAgentMotionMessageResponse(success, response, directives, awaiting_user_input, message, error_code)`: the answer of motion-flow; `directives` is the ordered movement list |
-| `decision.py` | `MotorDirective(arm: left\|right, degrees, direction: forward\|reverse)`, `RobotContext(directives, rejected_reason)` |
+| `session.py` | `AIAgentStartSessionRequest(username, email, session_name)`, `AIAgentStartSessionResponse(success, session_id, message, error_code)`, `AIAgentEndSessionRequest(session_id)`, `AIAgentEndSessionResponse(success, message, error_code)`, `AIAgentMessageRequest(session_id, message, speak_movements)`, `AIAgentMessageResponse(success, response, message, error_code, directives, awaiting_user_input, flow)` |
+| `decision.py` | `MotorDirective(arm: left\|right, degrees, direction: forward\|reverse)`, `AgentFlowName` (`identification`, `conversation`, `special`, `movement`) |
 
-Used by Brain and ai-agent. `AIAgentMessageRequest.robot_context` and `RobotContext` are reserved: Brain does not send them, because motion-flow runs after conversation-flow. `AIAgentMessageResponse.directive` is kept for compatibility; conversation-flow never sets it.
+Used by Brain and ai-agent. Since 0.13.0 Brain makes one call per message to `POST /session/message`: ai-agent identifies the message, runs one flow and answers with `flow`, `response`, `directives` and `awaiting_user_input`. `speak_movements` (request) is Brain's switch for a spoken line on a movement. 0.14.0 removed what the old two-route design needed: `AIAgentMotionMessageResponse` (`motion.py`), `RobotContext`, `AIAgentMessageRequest.robot_context` and the single `AIAgentMessageResponse.directive`.
 
 ## `microservices/microphone/`
 

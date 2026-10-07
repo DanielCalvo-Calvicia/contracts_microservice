@@ -1,0 +1,22 @@
+{
+  "ignore": ["contracts/stream/codec.py"],
+  "exclude": ["windows", "**/__pycache__", "build", "dist", "**/*.egg-info", "**/.mypy_cache"],
+  "executionEnvironments": [
+    {
+      "root": "tests",
+      "extraPaths": ["."],
+      "reportArgumentType": "none",
+      "reportAttributeAccessIssue": "none",
+      "reportOptionalMemberAccess": "none",
+      "reportOptionalSubscript": "none",
+      "reportOperatorIssue": "none",
+      "reportIncompatibleMethodOverride": "none",
+      "reportCallIssue": "none",
+      "reportMissingImports": "none",
+      "reportMissingModuleSource": "none"
+    },
+    {
+      "root": "."
+    }
+  ]
+}

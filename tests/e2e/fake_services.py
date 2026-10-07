@@ -171,11 +171,13 @@ def build_speaker() -> FastAPI:
 
 
 def build_ai_agent() -> FastAPI:
-    """ai-agent through its REAL composition root (flows, routes, sessions, tracing); only the LLM is replaced.
+    """ai-agent through its REAL composition root (router, flows, routes, sessions, tracing); only the LLM is replaced.
 
-    The replacement answers by the keywords of the user's message, so the two flows can be driven without a
-    provider: motion-flow plans "there and back" (left 90, then left -90), asks "how many degrees" when asked to
-    "move my arm", refuses "too far"; conversation-flow's draft says whether it was told a robot_context.
+    The replacement answers by the keywords of the user's message, so the flows can be driven without a provider.
+    Triage sends a message about an arm ("arm", "move", "turn") to the movement flow, one about a table to the
+    special flow and everything else to the conversation flow. The movement flow plans "there and back" (left 90, then
+    left -90), asks "how many degrees" when asked to "move my arm" and refuses "too far"; the draft says whether the
+    message was planned ("PLANNED", special flow) or not ("PLAIN", conversation flow).
     ``/_e2e/formats`` lists the LLM calls the service made (which phases ran) and ``/_e2e/reset`` forgets them.
     """
     import re
@@ -210,12 +212,31 @@ def build_ai_agent() -> FastAPI:
             if fmt == "<text>":  # phase 99: the question for the user
                 return build_response("Which arm, and how many degrees?", usage)
             if fmt == "triage_specialist_phase1_response_format":
+                heard = self._current_and_answers(text)
+                domain = ("movement" if any(word in heard for word in ("arm", "move", "turn", "rotate", "raise", "lift"))
+                          else "writing" if any(word in heard for word in ("table", "report", "essay", "plan", "list"))
+                          else "communication")
                 return build_response({
                     "intent": {"primary": "information_request", "secondary": [], "confidence": 0.9},
                     "user_goal": {"summary": "goal", "expected_outcome": "outcome"},
-                    "task_category": {"domain": "system", "type": "generation", "complexity": "low"},
+                    "task_category": {"domain": domain, "type": "generation", "complexity": "low"},
                     "next_step": {**steady_next_step, "status": "proceed", "recommended_action": "plan"},
                 }, usage)
+            if fmt == "project_manager_phase2_response_format":
+                return build_response({
+                    "actions": [{"id": "1", "description": "write the table", "action_type": "generation",
+                                 "dependencies": [], "required_inputs": [], "output": "", "error": "",
+                                 "mcp_context": {"server_id": "", "tool_name": "", "parameters": {}}}],
+                    "next_step": {**steady_next_step, "status": "proceed"}, "task_category_complexity": "low"}, usage)
+            if fmt == "safety_quality_gatekeeper_phase3_response_format":
+                return build_response({"safety_and_validation": {"sensitive": False, "requires_confirmation": False},
+                                       "next_step": {**steady_next_step, "status": "proceed"}}, usage)
+            if re.match(r"phase\d_single_action_response_format", fmt):
+                action_id = re.search(r"Action\(id=Id\(value='([^']+)'\)", text)
+                return build_response({"actions": [{
+                    "id": action_id.group(1) if action_id else "1", "description": "d", "action_type": "generation",
+                    "dependencies": [], "required_inputs": [], "error": "", "output": "the table",
+                    "mcp_context": {"server_id": "", "tool_name": "", "parameters": {}}}]}, usage)
             if fmt == "motion_planner_phase20_response_format":
                 heard = self._current_and_answers(text)
                 if "too far" in heard:
@@ -225,22 +246,26 @@ def build_ai_agent() -> FastAPI:
                 elif "30 degrees" in heard:
                     moves = [("left", 30, "forward")]
                 elif "move my arm" in heard:
-                    return build_response({"is_motion_request": True, "movements": [], "next_step": {
+                    return build_response({"is_motion_request": True, "movements": [], "spoken_reply": "", "next_step": {
                         "ready_to_execute": False, "status": "awaiting_user_input",
                         "recommended_action": "ask_user_for_missing_information", "blocking_reason": "details missing",
                         "requested_user_input": ["Which arm, and how many degrees?"]}}, usage)
+                elif "left" in heard or "right" in heard:       # any other request that names an arm
+                    arm = "left" if "left" in heard else "right"
+                    moves = [(arm, 90, "forward")] + ([(arm, -90, "forward")] if "back" in heard else [])
                 else:
                     return build_response({"is_motion_request": False, "movements": [],
+                                           "spoken_reply": "I can only move my arms.",
                                            "next_step": steady_next_step}, usage)
-                return build_response({"is_motion_request": True, "next_step": steady_next_step, "movements": [
+                return build_response({"is_motion_request": True, "next_step": steady_next_step,
+                                       "spoken_reply": "Moving my left arm.", "movements": [
                     {"arm": arm, "degrees": degrees, "direction": direction} for arm, degrees, direction in moves]}, usage)
             if fmt == "answer_checker_phase9_response_format":
                 reply = re.search(r"'user_reply': '([^']*)'", text)
                 return build_response({"verdict": "answered", "answer": reply.group(1) if reply else "",
                                        "message_to_user": ""}, usage)
             if fmt == "draft_writer_phase7_response_format":
-                told = re.search(r"'robot_context': (.*)\}$", text, re.S)
-                self.draft = ("TOLD " + told.group(1)) if told else "PLAIN"
+                self.draft = "PLAIN" if "'actions': None" in text else "PLANNED"
                 return build_response({"user_goal": {"summary": "s", "expected_outcome": self.draft}}, usage)
             if fmt == "editor_in_chief_phase8_response_format":
                 return build_response({"user_goal": {"summary": "s", "expected_outcome": self.draft},

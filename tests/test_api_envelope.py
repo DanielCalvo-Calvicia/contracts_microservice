@@ -1,6 +1,5 @@
 from contracts.api.common.envelope import ApiEnvelope
-from contracts.api.microservices.ai_agent.decision import MotorDirective, RobotContext
-from contracts.api.microservices.ai_agent.motion import AIAgentMotionMessageResponse
+from contracts.api.microservices.ai_agent.decision import MotorDirective
 from contracts.api.microservices.ai_agent.session import (
     AIAgentEndSessionResponse,
     AIAgentMessageRequest,
@@ -58,28 +57,11 @@ def test_ai_agent_session_data_shapes_match_what_the_service_sends():
     }
 
 
-def test_ai_agent_message_response_serializes_a_nested_motor_directive():
+def test_ai_agent_message_response_serializes_an_ordered_list_of_nested_motor_directives():
     """dataclasses.asdict (what ApiEnvelope.to_dict uses) must recurse into MotorDirective too,
     not leave it as a dataclass instance in the JSON-bound dict."""
     reply = AIAgentMessageResponse(
-        success=True, response="Sure, moving my arm now.",
-        directive=MotorDirective(arm="left", degrees=90.0, direction="forward"),
-    )
-    assert ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"] == {
-        "success": True, "response": "Sure, moving my arm now.",
-        "directive": {"arm": "left", "degrees": 90.0, "direction": "forward"},
-        "message": None, "error_code": None,
-    }
-
-
-def test_ai_agent_message_response_without_a_directive():
-    reply = AIAgentMessageResponse(success=True, response="Hi there!")
-    assert ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"]["directive"] is None
-
-
-def test_ai_agent_motion_response_serializes_an_ordered_list_of_directives():
-    reply = AIAgentMotionMessageResponse(
-        success=True, response="Moving my left arm there and back.",
+        success=True, response="Moving my left arm there and back.", flow="movement",
         directives=(
             MotorDirective(arm="left", degrees=90.0, direction="forward"),
             MotorDirective(arm="left", degrees=-90.0, direction="forward"),
@@ -87,31 +69,51 @@ def test_ai_agent_motion_response_serializes_an_ordered_list_of_directives():
     )
     assert ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"] == {
         "success": True, "response": "Moving my left arm there and back.",
+        "message": None, "error_code": None,
         "directives": (
             {"arm": "left", "degrees": 90.0, "direction": "forward"},
             {"arm": "left", "degrees": -90.0, "direction": "forward"},
         ),
-        "awaiting_user_input": False, "message": None, "error_code": None,
+        "awaiting_user_input": False, "flow": "movement",
     }
 
 
-def test_ai_agent_motion_response_without_movement_has_no_directives():
-    reply = AIAgentMotionMessageResponse(success=True, response="I cannot turn that far.")
+def test_ai_agent_message_response_without_movement_has_no_directives_and_no_flow():
+    reply = AIAgentMessageResponse(success=True, response="Hi there!")
     data = ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"]
-    assert data["directives"] == () and data["awaiting_user_input"] is False
+    assert data["directives"] == () and data["awaiting_user_input"] is False and data["flow"] is None
 
 
-def test_ai_agent_motion_response_can_carry_a_question_for_the_user():
-    reply = AIAgentMotionMessageResponse(success=True, response="How many degrees?", awaiting_user_input=True)
+def test_ai_agent_message_response_can_carry_a_question_for_the_user():
+    reply = AIAgentMessageResponse(success=True, response="How many degrees?", awaiting_user_input=True,
+                                   flow="movement")
     data = ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"]
     assert data["awaiting_user_input"] is True and data["directives"] == ()
 
 
-def test_ai_agent_message_request_carries_the_robot_context_to_conversation_flow():
-    context = RobotContext(directives=(MotorDirective(arm="right", degrees=45.0),), rejected_reason=None)
-    request = AIAgentMessageRequest(session_id="s1", message="wave", robot_context=context)
-    assert request.robot_context.directives[0].arm == "right"
-    assert AIAgentMessageRequest(session_id="s1", message="hi").robot_context is None
+def test_ai_agent_message_request_defaults_to_speaking_movements():
+    assert AIAgentMessageRequest(session_id="s", message="hi").speak_movements is True
+    assert AIAgentMessageRequest(session_id="s", message="hi", speak_movements=False).speak_movements is False
+
+
+def test_the_deprecated_two_route_contracts_are_gone():
+    import importlib
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("contracts.api.microservices.ai_agent.motion")
+    decision = importlib.import_module("contracts.api.microservices.ai_agent.decision")
+    assert not hasattr(decision, "RobotContext")
+    assert not hasattr(AIAgentMessageRequest(session_id="s", message="hi"), "robot_context")
+    assert not hasattr(AIAgentMessageResponse(success=True), "directive")
+
+
+def test_the_flow_names_are_the_four_flows_of_ai_agent():
+    from typing import get_args
+
+    from contracts.api.microservices.ai_agent.decision import AgentFlowName
+
+    assert get_args(AgentFlowName) == ("identification", "conversation", "special", "movement")
 
 
 def test_stepper_batch_result_data_shape_matches_what_the_service_sends():
