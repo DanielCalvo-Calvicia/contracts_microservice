@@ -71,10 +71,10 @@ def test_ai_agent_message_response_serializes_an_ordered_list_of_nested_motor_di
         "success": True, "response": "Moving my left arm there and back.",
         "message": None, "error_code": None,
         "directives": (
-            {"arm": "left", "degrees": 90.0, "direction": "forward"},
-            {"arm": "left", "degrees": -90.0, "direction": "forward"},
+            {"arm": "left", "degrees": 90.0, "direction": "forward", "pause_seconds": 0.0},
+            {"arm": "left", "degrees": -90.0, "direction": "forward", "pause_seconds": 0.0},
         ),
-        "awaiting_user_input": False, "flow": "movement",
+        "awaiting_user_input": False, "flow": "movement", "gesture": False,
     }
 
 
@@ -121,3 +121,22 @@ def test_stepper_batch_result_data_shape_matches_what_the_service_sends():
     assert ApiEnvelope.success("rotate", "ok", result).to_dict()["data"] == {
         "success": True, "message": "Successfully completed 200 steps.",
     }
+
+
+def test_a_gesture_is_a_list_of_movements_with_pauses_flagged_as_a_gesture():
+    reply = AIAgentMessageResponse(
+        success=True, response="That is wonderful news!", flow="conversation", gesture=True,
+        directives=(
+            MotorDirective(arm="left", degrees=60.0),
+            MotorDirective(arm="right", degrees=-45.0, direction="reverse", pause_seconds=0.8),
+        ),
+    )
+    data = ApiEnvelope.success("message_received", "ok", reply).to_dict()["data"]
+
+    assert data["gesture"] is True
+    assert [d["pause_seconds"] for d in data["directives"]] == [0.0, 0.8]  # the first one starts with the speech
+
+
+def test_a_movement_the_user_asked_for_is_not_a_gesture_and_has_no_pauses_by_default():
+    assert AIAgentMessageResponse(success=True).gesture is False
+    assert MotorDirective(arm="right", degrees=10.0).pause_seconds == 0.0

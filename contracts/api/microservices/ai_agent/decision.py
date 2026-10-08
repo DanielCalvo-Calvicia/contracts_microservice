@@ -15,8 +15,12 @@ class MotorDirective:
 
     ai-agent never calls stepper itself: Brain is the only service allowed to act on this,
     by translating it into a ``contracts.api.microservices.stepper`` command.
+
+    ``pause_seconds`` is how long Brain waits, after the previous movement of the sequence has ended, before it
+    starts this one (0 = at once). An expressive gesture uses it to move at irregular moments.
     """
 
     arm: Literal["left", "right"]
     degrees: float
     direction: Literal["forward", "reverse"] = "forward"
+    pause_seconds: float = 0.0

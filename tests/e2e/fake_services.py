@@ -237,6 +237,12 @@ def build_ai_agent() -> FastAPI:
                     "id": action_id.group(1) if action_id else "1", "description": "d", "action_type": "generation",
                     "dependencies": [], "required_inputs": [], "error": "", "output": "the table",
                     "mcp_context": {"server_id": "", "tool_name": "", "parameters": {}}}]}, usage)
+            if fmt == "emotion_reader_phase30_response_format":
+                heard = text.lower()
+                emotion, intensity = (("joy", 4) if any(word in heard for word in ("puppy", "wonderful", "happy"))
+                                      else ("sadness", 3) if any(word in heard for word in ("sad", "lost", "died"))
+                                      else ("calm", 2))
+                return build_response({"emotion": emotion, "intensity": intensity, "improvised": []}, usage)
             if fmt == "motion_planner_phase20_response_format":
                 heard = self._current_and_answers(text)
                 if "too far" in heard:

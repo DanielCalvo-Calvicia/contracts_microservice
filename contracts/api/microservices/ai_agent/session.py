@@ -51,6 +51,9 @@ class AIAgentMessageResponse:
     that is not to be spoken (see ``AIAgentMessageRequest.speak_movements``).
     ``directives`` is the movement sequence to run, in order (for example left 90, then left -90), empty when
     nothing is to be moved. Brain runs it as a whole or not at all, and is the only service that acts on it.
+    ``gesture`` tells what ``directives`` are: false = a movement the user asked for (Brain runs it at once, in
+    order); true = an expressive gesture that goes with the spoken reply (the emotion of the conversation). Brain
+    starts a gesture when the robot starts to speak and runs it in the background, without making the speech wait.
     ``awaiting_user_input`` is true when ``response`` is a question: the flow is paused and the next message of
     the session is its answer (ai-agent resumes that flow without identifying the message again).
     """
@@ -62,3 +65,4 @@ class AIAgentMessageResponse:
     directives: tuple[MotorDirective, ...] = ()
     awaiting_user_input: bool = False
     flow: Optional[AgentFlowName] = None
+    gesture: bool = False

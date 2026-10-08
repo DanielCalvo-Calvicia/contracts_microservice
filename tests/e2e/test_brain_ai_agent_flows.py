@@ -41,6 +41,7 @@ PLANNER = "motion_planner_phase20_response_format"
 PROJECT_MANAGER = "project_manager_phase2_response_format"
 DRAFT = "draft_writer_phase7_response_format"
 EDITOR = "editor_in_chief_phase8_response_format"
+EMOTION = "emotion_reader_phase30_response_format"
 
 
 def _free_port() -> int:
@@ -50,7 +51,8 @@ def _free_port() -> int:
 
 
 class AIAgentProcess:
-    def __init__(self) -> None:
+    def __init__(self, gestures: bool = False) -> None:
+        self.gestures = gestures        # the arm gesture that goes with a reply: off for the tests of the flows themselves
         self.port = _free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.proc: subprocess.Popen | None = None
@@ -59,6 +61,7 @@ class AIAgentProcess:
         self.proc = subprocess.Popen(
             [str(AI_AGENT_PYTHON), str(FAKE_SERVICES), "ai_agent", str(self.port)],
             cwd=AI_AGENT_DIR,
+            env={**os.environ, "AI_AGENT_EXPRESSION": "1" if self.gestures else "0", "AI_AGENT_EXPRESSION_SEED": "3"},
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
@@ -99,6 +102,16 @@ class AIAgentProcess:
 @pytest.fixture(scope="module")
 def agent():
     process = AIAgentProcess()
+    process.start()
+    try:
+        yield process
+    finally:
+        process.stop()
+
+
+@pytest.fixture(scope="module")
+def expressive_agent():
+    process = AIAgentProcess(gestures=True)
     process.start()
     try:
         yield process
@@ -288,3 +301,54 @@ def test_ai_agent_has_one_set_of_session_routes_and_no_routes_per_flow(agent):
     for route in ("start", "message", "end"):
         assert f"/session/{route}" in paths
     assert not [path for path in paths if "conversation-flow" in path or "motion-flow" in path]
+
+
+# ------------------------------------------------------------------ the gesture that goes with a reply
+
+
+def test_a_reply_comes_with_a_gesture_for_its_emotion_and_a_movement_asked_for_does_not(expressive_agent):
+    # Brain's own adapter against the real ai-agent process: the gesture arrives with its pauses and its flag
+    brain_dir = str(REPO / "brain_microservice")
+    if brain_dir not in sys.path:
+        sys.path.insert(0, brain_dir)
+    os.environ["AI_AGENT_BASE_URL"] = expressive_agent.base_url
+    from application.dtos.outbound_dtos import AgentFlowRequestDto, AIAgentStartSessionRequestDto
+    from composition_root.config import load_config
+    from composition_root.dependencies.brain_dependency import generate_brain_core_dependency
+
+    expressive_agent.reset()
+
+    async def main():
+        core = generate_brain_core_dependency(load_config())
+        adapter = core.agent_flow_adapters[0]
+        try:
+            session = await adapter.start_session(AIAgentStartSessionRequestDto(username="e2e"))
+            happy = await adapter.message(AgentFlowRequestDto(session_id=session.session_id, message="I just got a puppy!"))
+            asked = await adapter.message(AgentFlowRequestDto(session_id=session.session_id, message="turn your left arm 90 degrees"))
+            return happy, asked
+        finally:
+            for closing in (core.microphone_adapter, core.stt_adapter, core.tts_adapter, core.speaker_adapter,
+                            *core.agent_flow_adapters, core.stepper_adapter):
+                await closing.close()
+
+    happy, asked = asyncio.run(main())
+
+    assert happy.flow == "conversation" and happy.spoken == "PLAIN"
+    assert happy.gesture is True and happy.directives
+    assert happy.directives[0].pause_seconds == 0.0                      # starts with the speech
+    assert all(d.pause_seconds >= 0 and d.arm in ("left", "right") for d in happy.directives)
+    assert EMOTION in expressive_agent.formats()
+    assert asked.flow == "movement" and asked.gesture is False           # the user asked: the robot does just that
+
+
+def test_brain_decides_a_gesture_for_a_reply_and_plain_movements_for_a_request(expressive_agent):
+    async def scenario(service, stepper):
+        happy = await service.decide("I just got a puppy!")
+        asked = await service.decide("turn your left arm 90 degrees")
+        return happy, asked
+
+    happy, asked = with_brain(expressive_agent, scenario)
+
+    assert happy.spoken == ("PLAIN",) and happy.gesture is True and happy.directives
+    assert happy.directives[0].pause_seconds == 0.0                       # starts with the speech
+    assert asked.gesture is False and [d.degrees for d in asked.directives] == [90.0]
